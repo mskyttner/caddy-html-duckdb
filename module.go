@@ -2,12 +2,15 @@
 package caddyhtmlduckdb
 
 import (
+	"context"
+	"crypto/md5"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
-	"context"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
@@ -232,8 +235,29 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 		return caddyhttp.Error(http.StatusInternalServerError, err)
 	}
 
+	// Generate ETag from content hash
+	hash := md5.Sum([]byte(html))
+	etag := `"` + hex.EncodeToString(hash[:]) + `"`
+
+	// Check If-None-Match header for conditional requests (RFC 7232)
+	if match := r.Header.Get("If-None-Match"); match != "" {
+		if match == "*" {
+			w.WriteHeader(http.StatusNotModified)
+			return nil
+		}
+		// Handle multiple ETags: "etag1", "etag2", "etag3"
+		for _, m := range strings.Split(match, ",") {
+			if strings.TrimSpace(m) == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return nil
+			}
+		}
+	}
+
 	// Set headers
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(html)))
+	w.Header().Set("ETag", etag)
 	if h.CacheControl != "" {
 		w.Header().Set("Cache-Control", h.CacheControl)
 	}
