@@ -36,7 +36,7 @@ html_from_duckdb {
 
     route /works/* {
         html_from_duckdb {
-            database_path /srv/works.db
+            database_path works.db
             table html
             html_column html
             id_column pid
