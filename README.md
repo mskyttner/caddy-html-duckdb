@@ -36,7 +36,7 @@ html_from_duckdb {
 
     route /works/* {
         html_from_duckdb {
-            database_path /data/works.db
+            database_path /srv/works.db
             table html
             html_column html
             id_column pid
@@ -73,17 +73,20 @@ Run with your Caddyfile and database:
 ```bash
 docker run -p 8080:8080 \
   -v ./Caddyfile:/etc/caddy/Caddyfile:ro \
-  -v ./data:/data:ro \
+  -v ./mydata:/srv:ro \
   ghcr.io/mskyttner/caddy-html-duckdb:main
 ```
 
 ### Container Volumes
 
-| Path | Description |
-|------|-------------|
-| `/etc/caddy/Caddyfile` | Caddy configuration file |
-| `/data` | Database and data files |
-| `/config` | Caddy auto-saved config (optional) |
+| Path | Description | Mode |
+|------|-------------|------|
+| `/etc/caddy/Caddyfile` | Caddy configuration file | read-only |
+| `/srv` | Your database files | read-only OK |
+| `/data` | Caddy internal storage (TLS, locks) | read-write |
+| `/config` | Caddy auto-saved config | read-write |
+
+**Note:** Mount your database files to `/srv` (not `/data`). Caddy needs `/data` for its internal storage (TLS certificates, locks).
 
 ## Creating HTML Tables
 

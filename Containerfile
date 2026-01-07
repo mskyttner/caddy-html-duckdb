@@ -39,12 +39,16 @@ COPY --from=builder /caddy /usr/bin/caddy
 RUN chmod +x /usr/bin/caddy
 
 # Create directories for Caddy
-RUN mkdir -p /data /config /etc/caddy \
-    && chown -R caddy:caddy /data /config /home/caddy
+RUN mkdir -p /data /config /etc/caddy /srv \
+    && chown -R caddy:caddy /data /config /home/caddy /srv
 
 # Set Caddy environment variables
 ENV XDG_CONFIG_HOME=/config
 ENV XDG_DATA_HOME=/data
+
+# /srv is for user database files (can be read-only)
+# /data is for Caddy internal storage (must be writable)
+VOLUME ["/data", "/config", "/srv"]
 
 USER caddy
 
