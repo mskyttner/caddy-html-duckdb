@@ -29,8 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN useradd -r -u 1000 -s /sbin/nologin caddy
+# Create non-root user with home directory
+RUN useradd -r -u 1000 -m -d /home/caddy -s /sbin/nologin caddy
 
 # Copy binary from builder
 COPY --from=builder /caddy /usr/bin/caddy
@@ -38,8 +38,13 @@ COPY --from=builder /caddy /usr/bin/caddy
 # Set ownership and permissions
 RUN chmod +x /usr/bin/caddy
 
-# Create data directory
-RUN mkdir -p /data && chown caddy:caddy /data
+# Create directories for Caddy
+RUN mkdir -p /data /config /etc/caddy \
+    && chown -R caddy:caddy /data /config /home/caddy
+
+# Set Caddy environment variables
+ENV XDG_CONFIG_HOME=/config
+ENV XDG_DATA_HOME=/data
 
 USER caddy
 
