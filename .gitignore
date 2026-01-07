@@ -1,0 +1,18 @@
+# Binaries
+Caddyfile
+caddy
+caddy-with-duckdb
+caddy-working
+*.exe
+
+# Data files
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
