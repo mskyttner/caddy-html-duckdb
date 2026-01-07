@@ -239,11 +239,18 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 	hash := md5.Sum([]byte(html))
 	etag := `"` + hex.EncodeToString(hash[:]) + `"`
 
-	// Check If-None-Match header for conditional requests
+	// Check If-None-Match header for conditional requests (RFC 7232)
 	if match := r.Header.Get("If-None-Match"); match != "" {
-		if match == etag || match == "*" {
+		if match == "*" {
 			w.WriteHeader(http.StatusNotModified)
 			return nil
+		}
+		// Handle multiple ETags: "etag1", "etag2", "etag3"
+		for _, m := range strings.Split(match, ",") {
+			if strings.TrimSpace(m) == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return nil
+			}
 		}
 	}
 
