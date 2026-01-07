@@ -31,6 +31,23 @@ create or replace table html as (
 );
 ```
 
+## Container Image
+
+Pull the container image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/mskyttner/caddy-html-duckdb:main
+```
+
+Run with your Caddyfile and database:
+
+```bash
+docker run -p 8080:80 \
+  -v ./Caddyfile:/etc/caddy/Caddyfile:ro \
+  -v ./data:/data:ro \
+  ghcr.io/mskyttner/caddy-html-duckdb:main
+```
+
 ## Building
 
 Use the Makefile, with `make build`.
