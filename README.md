@@ -1,5 +1,7 @@
 # caddy-html-duckdb
 
+[![CI](https://github.com/mskyttner/caddy-html-duckdb/actions/workflows/ci.yml/badge.svg)](https://github.com/mskyttner/caddy-html-duckdb/actions/workflows/ci.yml)
+
 This caddy module exposes a duckdb table with a column containing rendered html at a route like "/works/{id}".
 
 A table with HTML rendered from a template can be created in duckdb using the tera extension with sql like this:
