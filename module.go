@@ -14,7 +14,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
-    "github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
+	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	_ "github.com/duckdb/duckdb-go/v2"
 	"go.uber.org/zap"
@@ -22,19 +22,19 @@ import (
 
 func init() {
 	caddy.RegisterModule(HTMLFromDuckDB{})
-    httpcaddyfile.RegisterHandlerDirective("html_from_duckdb", parseHTMLFromDuckDB)
-    httpcaddyfile.RegisterDirectiveOrder("html_from_duckdb", httpcaddyfile.After, "file_server")
+	httpcaddyfile.RegisterHandlerDirective("html_from_duckdb", parseHTMLFromDuckDB)
+	httpcaddyfile.RegisterDirectiveOrder("html_from_duckdb", httpcaddyfile.After, "file_server")
 }
 
 // parseHTMLFromDuckDB unmarshals Caddyfile tokens into a handler.
 func parseHTMLFromDuckDB(h httpcaddyfile.Helper) (caddyhttp.MiddlewareHandler, error) {
-    var m HTMLFromDuckDB
-    // Let your existing UnmarshalCaddyfile do the work
-    err := m.UnmarshalCaddyfile(h.Dispenser)
-    if err != nil {
-        return nil, err
-    }
-    return &m, nil
+	var m HTMLFromDuckDB
+	// Let your existing UnmarshalCaddyfile do the work
+	err := m.UnmarshalCaddyfile(h.Dispenser)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 // HTMLFromDuckDB is a Caddy HTTP handler that serves HTML content from a DuckDB table.

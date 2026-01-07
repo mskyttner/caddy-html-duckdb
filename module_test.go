@@ -52,9 +52,9 @@ func TestIfNoneMatchParsing(t *testing.T) {
 	targetETag := `"abc123"`
 
 	tests := []struct {
-		name           string
-		ifNoneMatch    string
-		shouldMatch    bool
+		name        string
+		ifNoneMatch string
+		shouldMatch bool
 	}{
 		{
 			name:        "exact match",
