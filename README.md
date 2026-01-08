@@ -68,7 +68,38 @@ Pull the container image from GitHub Container Registry:
 docker pull ghcr.io/mskyttner/caddy-html-duckdb:main
 ```
 
-Run with your Caddyfile and database:
+### Using Environment Variables (no Caddyfile needed)
+
+The container includes a default configuration that can be customized via environment variables:
+
+```bash
+docker run -p 8080:8080 \
+  -e DATABASE_PATH=works.db \
+  -e TABLE=html \
+  -e ID_COLUMN=pid \
+  -v ./mydata:/srv:ro \
+  ghcr.io/mskyttner/caddy-html-duckdb:main
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | Server port |
+| `DATABASE_PATH` | `data.db` | Path to DuckDB file |
+| `TABLE` | `html` | Table name |
+| `HTML_COLUMN` | `html` | Column with HTML content |
+| `ID_COLUMN` | `id` | Column for ID lookup |
+| `ROUTE_PATH` | `/*` | URL route pattern |
+| `READ_ONLY` | `true` | Open database read-only |
+| `CONNECTION_POOL_SIZE` | `10` | Max connections |
+| `QUERY_TIMEOUT` | `5s` | Query timeout |
+| `LOG_FORMAT` | `console` | Log format (`console` or `json`) |
+| `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
+
+### Using a Custom Caddyfile
+
+For advanced configuration, mount your own Caddyfile:
 
 ```bash
 docker run -p 8080:8080 \
@@ -82,7 +113,7 @@ docker run -p 8080:8080 \
 | Path | Description | Mode |
 |------|-------------|------|
 | `/etc/caddy/Caddyfile` | Caddy configuration file | read-only |
-| `/srv` | Your database files | read-only OK |
+| `/srv` | Your database files (workdir) | read-only OK |
 | `/data` | Caddy internal storage (TLS, locks) | read-write |
 | `/config` | Caddy auto-saved config | read-write |
 

@@ -1,0 +1,19 @@
+:{$PORT:8080} {
+	log {
+		output stdout
+		format {$LOG_FORMAT:console}
+		level {$LOG_LEVEL:INFO}
+	}
+
+	route {$ROUTE_PATH:/*} {
+		html_from_duckdb {
+			database_path {$DATABASE_PATH:data.db}
+			table {$TABLE:html}
+			html_column {$HTML_COLUMN:html}
+			id_column {$ID_COLUMN:id}
+			read_only {$READ_ONLY:true}
+			connection_pool_size {$CONNECTION_POOL_SIZE:10}
+			query_timeout {$QUERY_TIMEOUT:5s}
+		}
+	}
+}

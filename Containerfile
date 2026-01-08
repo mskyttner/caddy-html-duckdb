@@ -27,6 +27,9 @@ RUN chmod +x /usr/bin/caddy
 RUN mkdir -p /data /config /etc/caddy /srv \
     && chown -R caddy:caddy /data /config /home/caddy /srv
 
+COPY Caddyfile.default /etc/caddy/Caddyfile
+RUN chown caddy:caddy /etc/caddy/Caddyfile
+
 ENV XDG_CONFIG_HOME=/config
 ENV XDG_DATA_HOME=/data
 
