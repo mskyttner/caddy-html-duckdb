@@ -26,6 +26,7 @@ html_from_duckdb {
     search_enabled <bool>          # Enable search endpoint (default: false)
     search_macro <name>            # DuckDB macro for search results (default: "render_search")
     search_param <name>            # Query parameter for search (default: "q")
+    init_sql_file <path>           # SQL file to execute on startup (optional)
 }
 ```
 
@@ -104,6 +105,7 @@ docker run -p 8080:8080 \
 | `SEARCH_ENABLED` | `false` | Enable search endpoint |
 | `SEARCH_MACRO` | `render_search` | DuckDB macro for search results |
 | `SEARCH_PARAM` | `q` | Query parameter for search |
+| `INIT_SQL_COMMANDS_FILE` | (none) | SQL file to execute on startup |
 | `LOG_FORMAT` | `console` | Log format (`console` or `json`) |
 | `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
@@ -178,6 +180,7 @@ make clean    # Clean build artifacts
 - SQL injection protection for identifiers
 - Index page support via DuckDB table macros
 - Full-text search support via DuckDB table macros
+- Initialization SQL file for loading extensions and configuration
 
 ## Index and Search
 
@@ -216,3 +219,50 @@ The macro receives:
 - `base_path`: URL path for generating links
 
 Search results are served with `Cache-Control: no-cache` header.
+
+## Initialization SQL File
+
+The `init_sql_file` directive (or `INIT_SQL_COMMANDS_FILE` environment variable) allows you to execute SQL commands when the database connection is established. This is useful for:
+
+- Loading DuckDB extensions (`LOAD tera;`, `LOAD fts;`)
+- Setting configuration (`SET autoinstall_known_extensions=1;`)
+- Creating views, macros, or temporary tables
+
+### Example init.sql
+
+```sql
+-- Load required extensions
+SET autoinstall_known_extensions = 1;
+SET autoload_known_extensions = 1;
+
+LOAD tera;
+LOAD fts;
+
+/* Create a search macro that uses
+   full-text search */
+CREATE OR REPLACE MACRO render_search(term := '', base_path := '') AS TABLE
+SELECT html FROM (
+    SELECT '<ul>Results for: ' || term || '</ul>' AS html
+);
+```
+
+### Features
+
+- **Multiline statements**: Statements can span multiple lines
+- **Comments**: Both single-line (`--`) and block (`/* */`) comments are supported
+- **String literals**: Semicolons inside quoted strings are handled correctly
+- **Error reporting**: Failed statements report the statement number and content
+
+### Usage with Container
+
+```bash
+docker run -p 8080:8080 \
+  -e DATABASE_PATH=works.db \
+  -e INIT_SQL_COMMANDS_FILE=init.sql \
+  -e INDEX_ENABLED=true \
+  -e SEARCH_ENABLED=true \
+  -v ./mydata:/srv:ro \
+  ghcr.io/mskyttner/caddy-html-duckdb:main
+```
+
+Place your `init.sql` file in the mounted `/srv` directory alongside your database.
