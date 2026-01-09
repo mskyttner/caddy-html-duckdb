@@ -514,8 +514,12 @@ func (h *HTMLFromDuckDB) serveIndex(w http.ResponseWriter, r *http.Request, page
 	}
 
 	// Call the DuckDB macro
-	query := fmt.Sprintf("SELECT html FROM %s(page := ?, base_path := ?)",
-		sanitizeIdentifier(h.IndexMacro))
+	// Note: DuckDB table macros don't support ? parameter placeholders,
+	// so we use string interpolation with proper escaping
+	query := fmt.Sprintf("SELECT html FROM %s(page := %d, base_path := '%s')",
+		sanitizeIdentifier(h.IndexMacro),
+		pageNum,
+		escapeSQLString(basePath))
 
 	h.logger.Debug("executing index macro",
 		zap.String("macro", h.IndexMacro),
@@ -530,7 +534,7 @@ func (h *HTMLFromDuckDB) serveIndex(w http.ResponseWriter, r *http.Request, page
 	}
 
 	var html string
-	err := h.db.QueryRowContext(ctx, query, pageNum, basePath).Scan(&html)
+	err := h.db.QueryRowContext(ctx, query).Scan(&html)
 	if err != nil {
 		h.logger.Error("index macro failed", zap.Error(err))
 		return caddyhttp.Error(http.StatusInternalServerError, err)
@@ -556,11 +560,11 @@ func (h *HTMLFromDuckDB) serveIndex(w http.ResponseWriter, r *http.Request, page
 }
 
 // serveSearch serves search results by calling the search macro.
-func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, query string) error {
+func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, searchTerm string) error {
 	// Sanitize search query
-	query = strings.TrimSpace(query)
-	if len(query) > 200 {
-		query = query[:200]
+	searchTerm = strings.TrimSpace(searchTerm)
+	if len(searchTerm) > 200 {
+		searchTerm = searchTerm[:200]
 	}
 
 	// Derive base path from request if not configured
@@ -572,12 +576,16 @@ func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, que
 	}
 
 	// Call the DuckDB macro
-	sql := fmt.Sprintf("SELECT html FROM %s(term := ?, base_path := ?)",
-		sanitizeIdentifier(h.SearchMacro))
+	// Note: DuckDB table macros don't support ? parameter placeholders,
+	// so we use string interpolation with proper escaping
+	query := fmt.Sprintf("SELECT html FROM %s(term := '%s', base_path := '%s')",
+		sanitizeIdentifier(h.SearchMacro),
+		escapeSQLString(searchTerm),
+		escapeSQLString(basePath))
 
 	h.logger.Debug("executing search macro",
 		zap.String("macro", h.SearchMacro),
-		zap.String("query", query),
+		zap.String("term", searchTerm),
 		zap.String("base_path", basePath))
 
 	ctx := r.Context()
@@ -588,7 +596,7 @@ func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, que
 	}
 
 	var html string
-	err := h.db.QueryRowContext(ctx, sql, query, basePath).Scan(&html)
+	err := h.db.QueryRowContext(ctx, query).Scan(&html)
 	if err != nil {
 		h.logger.Error("search macro failed", zap.Error(err))
 		return caddyhttp.Error(http.StatusInternalServerError, err)
@@ -747,6 +755,12 @@ func sanitizeIdentifier(s string) string {
 		}
 	}
 	return result.String()
+}
+
+// escapeSQLString escapes single quotes in a string for safe SQL interpolation.
+// This is needed because DuckDB table macros don't support parameterized queries.
+func escapeSQLString(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
 }
 
 // Interface guards
