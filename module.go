@@ -2,12 +2,14 @@
 package caddyhtmlduckdb
 
 import (
+	"bufio"
 	"context"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -111,6 +113,12 @@ type HTMLFromDuckDB struct {
 	// If not set, it's derived from the route.
 	BasePath string `json:"base_path,omitempty"`
 
+	// InitSQLFile is the path to a SQL file containing initialization commands.
+	// Commands are executed after opening the database connection.
+	// Useful for loading extensions (LOAD tera;) and setting configuration.
+	// Supports multiline statements, single-line (--) and block (/* */) comments.
+	InitSQLFile string `json:"init_sql_file,omitempty"`
+
 	db      *sql.DB
 	timeout time.Duration
 	logger  *zap.Logger
@@ -199,6 +207,14 @@ func (h *HTMLFromDuckDB) Provision(ctx caddy.Context) error {
 		return fmt.Errorf("failed to ping database: %v", err)
 	}
 
+	// Execute init SQL file if specified
+	if h.InitSQLFile != "" {
+		if err := h.executeInitSQL(); err != nil {
+			h.db.Close()
+			return fmt.Errorf("failed to execute init SQL file: %v", err)
+		}
+	}
+
 	h.logger.Info("HTML from DuckDB handler provisioned",
 		zap.String("database", connStr),
 		zap.String("table", h.Table),
@@ -215,6 +231,161 @@ func (h *HTMLFromDuckDB) Cleanup() error {
 		return h.db.Close()
 	}
 	return nil
+}
+
+// executeInitSQL reads and executes SQL statements from the init file.
+func (h *HTMLFromDuckDB) executeInitSQL() error {
+	file, err := os.Open(h.InitSQLFile)
+	if err != nil {
+		return fmt.Errorf("failed to open init SQL file %s: %v", h.InitSQLFile, err)
+	}
+	defer file.Close()
+
+	h.logger.Info("executing init SQL file", zap.String("file", h.InitSQLFile))
+
+	// Read entire file
+	var content strings.Builder
+	scanner := bufio.NewScanner(file)
+	// Increase buffer size for large files
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
+	for scanner.Scan() {
+		content.WriteString(scanner.Text())
+		content.WriteString("\n")
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("failed to read init SQL file: %v", err)
+	}
+
+	// Parse and execute statements
+	statements := parseSQLStatements(content.String())
+	for i, stmt := range statements {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+
+		h.logger.Debug("executing init SQL statement",
+			zap.Int("index", i+1),
+			zap.String("statement", truncateForLog(stmt, 100)))
+
+		if _, err := h.db.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to execute statement %d: %v\nStatement: %s", i+1, err, truncateForLog(stmt, 200))
+		}
+	}
+
+	h.logger.Info("init SQL file executed successfully",
+		zap.String("file", h.InitSQLFile),
+		zap.Int("statements", len(statements)))
+
+	return nil
+}
+
+// parseSQLStatements splits SQL content into individual statements.
+// Handles multiline statements, string literals, and both comment styles.
+func parseSQLStatements(content string) []string {
+	var statements []string
+	var current strings.Builder
+	var inSingleQuote, inDoubleQuote, inLineComment, inBlockComment bool
+	var prev rune
+
+	for i, r := range content {
+		// Handle line comments (--)
+		if !inSingleQuote && !inDoubleQuote && !inBlockComment && r == '-' && prev == '-' {
+			inLineComment = true
+			// Remove the first '-' we already added
+			s := current.String()
+			if len(s) > 0 {
+				current.Reset()
+				current.WriteString(s[:len(s)-1])
+			}
+			prev = r
+			continue
+		}
+
+		// End line comment on newline
+		if inLineComment && r == '\n' {
+			inLineComment = false
+			current.WriteRune(' ') // Replace comment with space
+			prev = r
+			continue
+		}
+
+		// Skip chars in line comment
+		if inLineComment {
+			prev = r
+			continue
+		}
+
+		// Handle block comments (/* */)
+		if !inSingleQuote && !inDoubleQuote && !inBlockComment && r == '*' && prev == '/' {
+			inBlockComment = true
+			// Remove the '/' we already added
+			s := current.String()
+			if len(s) > 0 {
+				current.Reset()
+				current.WriteString(s[:len(s)-1])
+			}
+			prev = r
+			continue
+		}
+
+		// End block comment
+		if inBlockComment && r == '/' && prev == '*' {
+			inBlockComment = false
+			current.WriteRune(' ') // Replace comment with space
+			prev = r
+			continue
+		}
+
+		// Skip chars in block comment
+		if inBlockComment {
+			prev = r
+			continue
+		}
+
+		// Handle string literals
+		if r == '\'' && !inDoubleQuote && prev != '\\' {
+			inSingleQuote = !inSingleQuote
+		}
+		if r == '"' && !inSingleQuote && prev != '\\' {
+			inDoubleQuote = !inDoubleQuote
+		}
+
+		// Statement terminator
+		if r == ';' && !inSingleQuote && !inDoubleQuote {
+			stmt := strings.TrimSpace(current.String())
+			if stmt != "" {
+				statements = append(statements, stmt)
+			}
+			current.Reset()
+			prev = r
+			continue
+		}
+
+		current.WriteRune(r)
+		prev = r
+
+		// Peek ahead for -- and /* detection
+		_ = i
+	}
+
+	// Add final statement if no trailing semicolon
+	if stmt := strings.TrimSpace(current.String()); stmt != "" {
+		statements = append(statements, stmt)
+	}
+
+	return statements
+}
+
+// truncateForLog truncates a string for logging purposes.
+func truncateForLog(s string, maxLen int) string {
+	// Normalize whitespace for logging
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 // ServeHTTP serves HTML content from DuckDB.
@@ -551,6 +722,12 @@ func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.ArgErr()
 				}
 				h.BasePath = d.Val()
+
+			case "init_sql_file":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				h.InitSQLFile = d.Val()
 
 			default:
 				return d.Errf("unrecognized subdirective: %s", d.Val())

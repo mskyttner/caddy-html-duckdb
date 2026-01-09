@@ -458,3 +458,136 @@ func TestServeHTTP_SearchRouting(t *testing.T) {
 		}
 	})
 }
+
+func TestParseSQLStatements(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "simple statements",
+			input:    "SELECT 1; SELECT 2;",
+			expected: []string{"SELECT 1", "SELECT 2"},
+		},
+		{
+			name:     "multiline statement",
+			input:    "CREATE TABLE foo (\n  id INT,\n  name VARCHAR\n);",
+			expected: []string{"CREATE TABLE foo (\n  id INT,\n  name VARCHAR\n)"},
+		},
+		{
+			name:     "single line comment",
+			input:    "SELECT 1; -- this is a comment\nSELECT 2;",
+			expected: []string{"SELECT 1", "SELECT 2"},
+		},
+		{
+			name:     "block comment",
+			input:    "SELECT /* inline comment */ 1; SELECT 2;",
+			expected: []string{"SELECT   1", "SELECT 2"},
+		},
+		{
+			name:     "multiline block comment",
+			input:    "SELECT 1;\n/* this is\na multiline\ncomment */\nSELECT 2;",
+			expected: []string{"SELECT 1", "SELECT 2"},
+		},
+		{
+			name:     "semicolon in single quoted string",
+			input:    "SELECT 'hello; world'; SELECT 2;",
+			expected: []string{"SELECT 'hello; world'", "SELECT 2"},
+		},
+		{
+			name:     "semicolon in double quoted string",
+			input:    `SELECT "hello; world"; SELECT 2;`,
+			expected: []string{`SELECT "hello; world"`, "SELECT 2"},
+		},
+		{
+			name:     "complex multiline with comments and strings",
+			input:    "-- Load extensions\nLOAD tera;\n/* Configure\n   settings */\nSET search_path = 'my;path';\nSELECT 1;",
+			expected: []string{"LOAD tera", "SET search_path = 'my;path'", "SELECT 1"},
+		},
+		{
+			name:     "no trailing semicolon",
+			input:    "SELECT 1; SELECT 2",
+			expected: []string{"SELECT 1", "SELECT 2"},
+		},
+		{
+			name:     "empty input",
+			input:    "",
+			expected: []string{},
+		},
+		{
+			name:     "only comments",
+			input:    "-- just a comment\n/* another comment */",
+			expected: []string{},
+		},
+		{
+			name: "DuckDB macro with multiline",
+			input: `CREATE OR REPLACE MACRO render_index(page := 1) AS TABLE
+SELECT html FROM (
+    SELECT '<html>Page ' || page || '</html>' AS html
+);`,
+			expected: []string{`CREATE OR REPLACE MACRO render_index(page := 1) AS TABLE
+SELECT html FROM (
+    SELECT '<html>Page ' || page || '</html>' AS html
+)`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseSQLStatements(tt.input)
+
+			if len(got) != len(tt.expected) {
+				t.Errorf("parseSQLStatements() returned %d statements, want %d\ngot: %v\nwant: %v",
+					len(got), len(tt.expected), got, tt.expected)
+				return
+			}
+
+			for i := range got {
+				// Normalize whitespace for comparison
+				gotNorm := strings.Join(strings.Fields(got[i]), " ")
+				expNorm := strings.Join(strings.Fields(tt.expected[i]), " ")
+				if gotNorm != expNorm {
+					t.Errorf("statement %d mismatch:\ngot:  %q\nwant: %q", i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+func TestTruncateForLog(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		maxLen int
+		want   string
+	}{
+		{
+			name:   "short string unchanged",
+			input:  "SELECT 1",
+			maxLen: 100,
+			want:   "SELECT 1",
+		},
+		{
+			name:   "long string truncated",
+			input:  "SELECT * FROM very_long_table_name WHERE condition = 'value'",
+			maxLen: 20,
+			want:   "SELECT * FROM very_l...",
+		},
+		{
+			name:   "normalizes whitespace",
+			input:  "SELECT\n  *\n  FROM\n  table",
+			maxLen: 100,
+			want:   "SELECT * FROM table",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateForLog(tt.input, tt.maxLen)
+			if got != tt.want {
+				t.Errorf("truncateForLog() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
