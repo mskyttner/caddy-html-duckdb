@@ -403,8 +403,8 @@ func TestServeHTTP_SearchRouting(t *testing.T) {
 
 	handler := &HTMLFromDuckDB{
 		Table:         "html",
-		HTMLColumn:   "html",
-		IDColumn:     "id",
+		HTMLColumn:    "html",
+		IDColumn:      "id",
 		SearchEnabled: true,
 		SearchMacro:   "render_search",
 		SearchParam:   "q",

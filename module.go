@@ -232,9 +232,12 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 		id = r.URL.Query().Get(h.IDParam)
 	} else {
 		// Get from path (last segment)
-		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) > 0 {
-			id = parts[len(parts)-1]
+		// If path ends with /, treat as index request (no ID)
+		if !strings.HasSuffix(r.URL.Path, "/") {
+			parts := strings.Split(r.URL.Path, "/")
+			if len(parts) > 0 {
+				id = parts[len(parts)-1]
+			}
 		}
 	}
 
