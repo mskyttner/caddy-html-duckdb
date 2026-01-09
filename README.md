@@ -21,6 +21,11 @@ html_from_duckdb {
     read_only <bool>               # Open database read-only (default: true)
     connection_pool_size <int>     # Max connections (default: 10)
     query_timeout <duration>       # Query timeout (default: "5s")
+    index_enabled <bool>           # Enable index page (default: false)
+    index_macro <name>             # DuckDB macro for index page (default: "render_index")
+    search_enabled <bool>          # Enable search endpoint (default: false)
+    search_macro <name>            # DuckDB macro for search results (default: "render_search")
+    search_param <name>            # Query parameter for search (default: "q")
 }
 ```
 
@@ -94,6 +99,11 @@ docker run -p 8080:8080 \
 | `READ_ONLY` | `true` | Open database read-only |
 | `CONNECTION_POOL_SIZE` | `10` | Max connections |
 | `QUERY_TIMEOUT` | `5s` | Query timeout |
+| `INDEX_ENABLED` | `false` | Enable index page |
+| `INDEX_MACRO` | `render_index` | DuckDB macro for index page |
+| `SEARCH_ENABLED` | `false` | Enable search endpoint |
+| `SEARCH_MACRO` | `render_search` | DuckDB macro for search results |
+| `SEARCH_PARAM` | `q` | Query parameter for search |
 | `LOG_FORMAT` | `console` | Log format (`console` or `json`) |
 | `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
@@ -166,3 +176,43 @@ make clean    # Clean build artifacts
 - Connection pooling
 - Query timeouts
 - SQL injection protection for identifiers
+- Index page support via DuckDB table macros
+- Full-text search support via DuckDB table macros
+
+## Index and Search
+
+When enabled, the module can serve index pages and search results by calling DuckDB table macros.
+
+### Index Page
+
+When `index_enabled` is `true` and a request has no document ID, the module calls the `index_macro` (default: `render_index`):
+
+```sql
+CREATE OR REPLACE MACRO render_index(page := 1, base_path := '') AS TABLE
+SELECT html FROM (
+    -- Your index page generation logic here
+    SELECT '<html>Page ' || page || '</html>' AS html
+);
+```
+
+The macro receives:
+- `page`: Page number from `?page=N` query parameter (default: 1)
+- `base_path`: URL path for generating links
+
+### Search
+
+When `search_enabled` is `true` and the search parameter (default: `q`) is present, the module calls the `search_macro` (default: `render_search`):
+
+```sql
+CREATE OR REPLACE MACRO render_search(term := '', base_path := '') AS TABLE
+SELECT html FROM (
+    -- Your search logic here
+    SELECT '<ul>Results for: ' || term || '</ul>' AS html
+);
+```
+
+The macro receives:
+- `term`: Search query (truncated to 200 characters for safety)
+- `base_path`: URL path for generating links
+
+Search results are served with `Cache-Control: no-cache` header.

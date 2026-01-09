@@ -306,3 +306,155 @@ func emptyNextHandler() caddyhttp.Handler {
 		return nil
 	})
 }
+
+func TestServeHTTP_IndexRouting(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table and mock index macro
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create a simple mock macro that returns HTML
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_index(page := 1, base_path := '') AS TABLE
+		SELECT '<html>Index Page ' || page || '</html>' AS html
+	`)
+	if err != nil {
+		t.Fatalf("failed to create mock macro: %v", err)
+	}
+
+	handler := &HTMLFromDuckDB{
+		Table:        "html",
+		HTMLColumn:   "html",
+		IDColumn:     "id",
+		IndexEnabled: true,
+		IndexMacro:   "render_index",
+		SearchParam:  "q",
+		db:           db,
+		logger:       zap.NewNop(),
+	}
+
+	t.Run("serves index page when no ID and index enabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Index Page") {
+			t.Errorf("body should contain 'Index Page', got %q", body)
+		}
+	})
+
+	t.Run("serves index page with page parameter", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/?page=2", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Index Page 2") {
+			t.Errorf("body should contain 'Index Page 2', got %q", body)
+		}
+	})
+}
+
+func TestServeHTTP_SearchRouting(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table and mock search macro
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create a simple mock macro that returns search results
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_search(term := '', base_path := '') AS TABLE
+		SELECT '<ul>Results for: ' || term || '</ul>' AS html
+	`)
+	if err != nil {
+		t.Fatalf("failed to create mock macro: %v", err)
+	}
+
+	handler := &HTMLFromDuckDB{
+		Table:         "html",
+		HTMLColumn:   "html",
+		IDColumn:     "id",
+		SearchEnabled: true,
+		SearchMacro:   "render_search",
+		SearchParam:   "q",
+		db:            db,
+		logger:        zap.NewNop(),
+	}
+
+	t.Run("serves search results when search param present", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/?q=test", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Results for: test") {
+			t.Errorf("body should contain 'Results for: test', got %q", body)
+		}
+
+		// Search results should have no-cache header
+		cacheControl := rec.Header().Get("Cache-Control")
+		if cacheControl != "no-cache" {
+			t.Errorf("Cache-Control = %q, want 'no-cache'", cacheControl)
+		}
+	})
+
+	t.Run("truncates long search queries", func(t *testing.T) {
+		longQuery := strings.Repeat("a", 250)
+		req := httptest.NewRequest(http.MethodGet, "/works/?q="+longQuery, nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		// The query should be truncated to 200 chars
+		body := rec.Body.String()
+		if strings.Contains(body, longQuery) {
+			t.Error("body should not contain full long query (should be truncated)")
+		}
+	})
+}
