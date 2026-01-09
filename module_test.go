@@ -555,6 +555,44 @@ SELECT html FROM (
 	}
 }
 
+func TestEscapeSQLString(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "no quotes",
+			input: "hello world",
+			want:  "hello world",
+		},
+		{
+			name:  "single quote",
+			input: "it's a test",
+			want:  "it''s a test",
+		},
+		{
+			name:  "multiple quotes",
+			input: "it's Bob's test",
+			want:  "it''s Bob''s test",
+		},
+		{
+			name:  "SQL injection attempt",
+			input: "'; DROP TABLE users; --",
+			want:  "''; DROP TABLE users; --",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeSQLString(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeSQLString(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTruncateForLog(t *testing.T) {
 	tests := []struct {
 		name   string
