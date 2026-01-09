@@ -266,3 +266,37 @@ docker run -p 8080:8080 \
 ```
 
 Place your `init.sql` file in the mounted `/srv` directory alongside your database.
+
+## Troubleshooting
+
+### Permission Denied with Rootless Podman/Docker
+
+When using rootless Podman or Docker, you may encounter permission errors:
+
+```
+Cannot open file "/srv/test.db.wal": Permission denied
+```
+
+**Cause:** Rootless containers run as a non-root user (UID 1000). The container user needs write access to create DuckDB's WAL (Write-Ahead Log) files.
+
+**Solutions:**
+
+1. **For read-only databases** (recommended for production):
+   ```bash
+   # Pre-create macros on host, then mount read-only
+   duckdb works.db < init.sql
+   docker run -e READ_ONLY=true -v ./data:/srv:ro ...
+   ```
+
+2. **For writable databases** (development/testing):
+   ```bash
+   # Ensure directory is writable by container user
+   chmod 777 ./mydata
+   docker run -e READ_ONLY=false -v ./mydata:/srv ...
+   ```
+
+| Scenario | `READ_ONLY` | Volume Mount | Notes |
+|----------|-------------|--------------|-------|
+| Production | `true` (default) | `:ro` | Pre-create macros in database |
+| Init SQL with CREATE | `false` | writable | Directory must be writable |
+| Development | `false` | writable | Allows runtime modifications |
