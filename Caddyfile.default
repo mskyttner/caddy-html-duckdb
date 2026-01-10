@@ -20,6 +20,7 @@
 			search_macro {$SEARCH_MACRO:render_search}
 			search_param {$SEARCH_PARAM:q}
 			init_sql_file {$INIT_SQL_COMMANDS_FILE:}
+			record_macro {$RECORD_MACRO:}
 		}
 	}
 }

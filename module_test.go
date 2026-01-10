@@ -629,3 +629,135 @@ func TestTruncateForLog(t *testing.T) {
 		})
 	}
 }
+
+func TestServeHTTP_RecordMacro(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create a source data table (not pre-rendered HTML)
+	_, err = db.Exec(`CREATE TABLE publications (pid VARCHAR, title VARCHAR, abstract VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	_, err = db.Exec(`INSERT INTO publications VALUES ('12345', 'Test Publication', 'This is an abstract.')`)
+	if err != nil {
+		t.Fatalf("failed to insert test data: %v", err)
+	}
+
+	// Create a record macro that renders HTML on-the-fly
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_record(id := '') AS TABLE
+		SELECT '<html><h1>' || title || '</h1><p>' || abstract || '</p></html>' AS html
+		FROM publications
+		WHERE pid = id
+	`)
+	if err != nil {
+		t.Fatalf("failed to create render_record macro: %v", err)
+	}
+
+	handler := &HTMLFromDuckDB{
+		RecordMacro: "render_record",
+		HTMLColumn:  "html",
+		db:          db,
+		logger:      zap.NewNop(),
+	}
+
+	t.Run("serves content via record macro", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/12345", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Test Publication") {
+			t.Errorf("body should contain 'Test Publication', got %q", body)
+		}
+		if !strings.Contains(body, "This is an abstract") {
+			t.Errorf("body should contain 'This is an abstract', got %q", body)
+		}
+	})
+
+	t.Run("returns 404 for non-existent record", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/nonexistent", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err == nil {
+			t.Fatal("expected error for non-existent record")
+		}
+
+		// The error should be a 404
+		httpErr, ok := err.(caddyhttp.HandlerError)
+		if !ok {
+			t.Fatalf("expected caddyhttp.HandlerError, got %T", err)
+		}
+		if httpErr.StatusCode != http.StatusNotFound {
+			t.Errorf("status = %d, want %d", httpErr.StatusCode, http.StatusNotFound)
+		}
+	})
+
+	t.Run("handles special characters in ID", func(t *testing.T) {
+		// Insert a record with a special ID
+		_, err = db.Exec(`INSERT INTO publications VALUES ('test''s-id', 'Special Title', 'Special abstract.')`)
+		if err != nil {
+			t.Fatalf("failed to insert test data: %v", err)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/works/test's-id", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, "Special Title") {
+			t.Errorf("body should contain 'Special Title', got %q", body)
+		}
+	})
+
+	t.Run("ETag works with record macro", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/works/12345", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		etag := rec.Header().Get("ETag")
+		if etag == "" {
+			t.Error("ETag header missing")
+		}
+
+		// Make second request with If-None-Match
+		req2 := httptest.NewRequest(http.MethodGet, "/works/12345", nil)
+		req2.Header.Set("If-None-Match", etag)
+		rec2 := httptest.NewRecorder()
+
+		err = handler.ServeHTTP(rec2, req2, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec2.Code != http.StatusNotModified {
+			t.Errorf("status = %d, want %d", rec2.Code, http.StatusNotModified)
+		}
+	})
+}

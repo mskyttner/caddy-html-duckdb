@@ -27,6 +27,7 @@ html_from_duckdb {
     search_macro <name>            # DuckDB macro for search results (default: "render_search")
     search_param <name>            # Query parameter for search (default: "q")
     init_sql_file <path>           # SQL file to execute on startup (optional)
+    record_macro <name>            # DuckDB macro for on-the-fly record rendering (optional)
 }
 ```
 
@@ -106,6 +107,7 @@ docker run -p 8080:8080 \
 | `SEARCH_MACRO` | `render_search` | DuckDB macro for search results |
 | `SEARCH_PARAM` | `q` | Query parameter for search |
 | `INIT_SQL_COMMANDS_FILE` | (none) | SQL file to execute on startup |
+| `RECORD_MACRO` | (none) | DuckDB macro for on-the-fly record rendering |
 | `LOG_FORMAT` | `console` | Log format (`console` or `json`) |
 | `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
@@ -181,6 +183,7 @@ make clean    # Clean build artifacts
 - Index page support via DuckDB table macros
 - Full-text search support via DuckDB table macros
 - Initialization SQL file for loading extensions and configuration
+- On-the-fly record rendering via DuckDB table macros
 
 ## Index and Search
 
@@ -219,6 +222,71 @@ The macro receives:
 - `base_path`: URL path for generating links
 
 Search results are served with `Cache-Control: no-cache` header.
+
+## Record Macro (On-the-fly Rendering)
+
+Instead of serving pre-rendered HTML from a table, you can use a DuckDB table macro to render pages on-the-fly. This is useful when you want to use Tera templates without pre-rendering all pages.
+
+### Configuration
+
+Set the `record_macro` directive (or `RECORD_MACRO` environment variable) to the name of your rendering macro:
+
+```caddyfile
+html_from_duckdb {
+    database_path works.db
+    record_macro render_record
+    html_column html
+    cache_control "public, max-age=3600"
+}
+```
+
+When `record_macro` is set, the handler queries using:
+```sql
+SELECT html FROM render_record(id := 'requested_id')
+```
+
+Instead of the traditional table query:
+```sql
+SELECT html FROM table WHERE id = 'requested_id'
+```
+
+### Example Macro
+
+Create a table macro that renders HTML using Tera templates:
+
+```sql
+CREATE OR REPLACE MACRO render_record(id := '') AS TABLE
+SELECT tera_render(
+    'works_template.html',
+    pub,
+    template_path := 'templates/*'
+) AS html
+FROM publications
+WHERE pid = id;
+```
+
+### Usage with Container
+
+```bash
+docker run -p 8080:8080 \
+  -e DATABASE_PATH=works.db \
+  -e RECORD_MACRO=render_record \
+  -e INIT_SQL_COMMANDS_FILE=init.sql \
+  -v ./mydata:/srv:ro \
+  ghcr.io/mskyttner/caddy-html-duckdb:main
+```
+
+### Comparison
+
+| Feature | Table-based (`table`) | Macro-based (`record_macro`) |
+|---------|----------------------|------------------------------|
+| Query | `SELECT html FROM table WHERE id = ?` | `SELECT html FROM macro(id := 'x')` |
+| Storage | Pre-rendered HTML in table | Source data + templates |
+| Rendering | At build time | On each request |
+| Flexibility | Static content | Dynamic (template changes apply immediately) |
+| Performance | Faster (no rendering) | Slower (rendering per request) |
+
+**Note:** When `record_macro` is set, the `table`, `id_column`, and `where_clause` directives are ignored for individual record queries. Index and search still use their respective macros.
 
 ## Initialization SQL File
 
