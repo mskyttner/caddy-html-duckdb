@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title | default(value="Index") }}{% endblock %}
+
+{% block head %}
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+{% endblock %}
+
+{% block styles %}
+        /* Index page - override container for narrower layout */
+        body {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        h1 { margin-bottom: 1.5rem; }
+
+        /* Search box */
+        .search-container { margin-bottom: 2rem; }
+        .search-box {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .search-box input[type="search"] {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-card);
+            color: var(--fg);
+        }
+        .search-box input[type="search"]:focus {
+            outline: 2px solid var(--link);
+            outline-offset: -1px;
+        }
+
+        /* Results area */
+        #search-results {
+            min-height: 100px;
+        }
+        .htmx-request #search-results {
+            opacity: 0.5;
+        }
+        .htmx-indicator {
+            display: none;
+        }
+        .htmx-request .htmx-indicator {
+            display: inline-block;
+        }
+
+        /* Item list */
+        .item-list { list-style: none; padding: 0; margin: 0; }
+        .item {
+            padding: 0.25rem 0;
+        }
+        .item:last-child { border-bottom: none; }
+        .item-title {
+            margin: 0 0 0.25rem;
+            font-size: 1.1rem;
+        }
+        .item-title a {
+            color: var(--link);
+            text-decoration: none;
+        }
+        .item-title a:hover { text-decoration: underline; }
+        .item-meta {
+            font-size: 0.875rem;
+            color: var(--fg-muted);
+        }
+        .item-snippet {
+            margin-top: 0.5rem;
+            font-size: 0.9rem;
+            color: var(--fg-muted);
+        }
+        .score {
+            background: var(--link);
+            color: white;
+            padding: 0.125rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            margin-left: 0.5rem;
+        }
+
+        /* Pagination */
+        .pagination {
+            display: flex;
+            gap: 1rem;
+            margin-top: 2rem;
+            margin-bottom: 2rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+        .pagination a {
+            color: var(--link);
+            text-decoration: none;
+        }
+
+        /* Empty state */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--fg-muted);
+        }
+
+        /* Logo sizing for index page */
+        .kth-works-logo {
+            max-width: 250px;
+            height: auto;
+            margin-bottom: 1rem;
+        }
+{% endblock %}
+
+{% block body %}
+    {% include "logo.html" %}
+
+    <h1>{{ title | default(value="Available Pages") }}</h1>
+
+    {% if search_enabled %}
+    <div class="search-container">
+        <form class="search-box" hx-get="{{ search_endpoint | default(value='/search') }}"
+              hx-target="#search-results"
+              hx-trigger="submit"
+              hx-indicator=".htmx-indicator">
+            <input type="search"
+                   name="q"
+                   placeholder="Search content..."
+                   autocomplete="off"
+                   hx-get="{{ search_endpoint | default(value='/search') }}"
+                   hx-target="#search-results"
+                   hx-trigger="input changed delay:300ms, search"
+                   hx-indicator=".htmx-indicator">
+            <span class="htmx-indicator">Searching...</span>
+        </form>
+    </div>
+    {% endif %}
+
+    <div id="search-results">
+        {% if items and items | length > 0 %}
+
+        {% if pagination %}
+        <div class="pagination">
+            {% if prev_page %}<a href="?page={{ prev_page }}">&larr; Previous</a>{% endif %}
+            <span>Page {{ current_page | default(value=1) }} of {{ total_pages | default(value=1) }}</span>
+            {% if next_page %}<a href="?page={{ next_page }}">Next &rarr;</a>{% endif %}
+        </div>
+        {% endif %}
+
+        <ul class="item-list">
+            {% for item in items %}
+            <li class="item">
+                <h2 class="item-title">
+                    <a href="{{ base_path | default(value='') }}/{{ item.id }}">
+                        <pre>{{ item.title | default(value=item.id) }}</pre>
+                    </a>
+                </h2>
+                {% if item.description %}
+                <p class="item-snippet">{{ item.description | truncate(length=150) }}</p>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+
+
+        {% else %}
+        <div class="empty-state">
+            <p>No pages available.</p>
+        </div>
+        {% endif %}
+    </div>
+{% endblock %}

@@ -368,3 +368,45 @@ Cannot open file "/srv/test.db.wal": Permission denied
 | Production | `true` (default) | `:ro` | Pre-create macros in database |
 | Init SQL with CREATE | `false` | writable | Directory must be writable |
 | Development | `false` | writable | Allows runtime modifications |
+
+## Examples
+
+The `examples/` directory contains complete working examples:
+
+### Database Setup (`examples/html_db.sql`)
+
+A comprehensive SQL script that demonstrates:
+- Loading DuckDB extensions (tera, webbed, fts)
+- Creating a `render_html` macro for on-the-fly record rendering
+- Setting up full-text search with `html_search` and `render_search` macros
+- Creating a paginated index with `render_index` macro
+- Helper functions like `html_to_text` for extracting text from HTML
+
+### Tera Templates (`examples/templates/`)
+
+| Template | Description |
+|----------|-------------|
+| `base.html` | Shared base template with CSS variables (light/dark mode) |
+| `logo.html` | Extractable SVG logo partial |
+| `record.html` | Individual record/publication page |
+| `index.html` | Paginated index page with HTMX search |
+| `search.html` | Search results fragment (HTMX partial) |
+
+### Using the Examples
+
+```bash
+# Copy examples to your data directory
+cp -r examples/templates ./mydata/
+cp examples/html_db.sql ./mydata/init.sql
+
+# Run the container
+docker run -p 8080:8080 \
+  -e DATABASE_PATH=works.db \
+  -e RECORD_MACRO=render_html \
+  -e INDEX_ENABLED=true \
+  -e SEARCH_ENABLED=true \
+  -e INIT_SQL_COMMANDS_FILE=init.sql \
+  -e READ_ONLY=false \
+  -v ./mydata:/srv \
+  ghcr.io/mskyttner/caddy-html-duckdb:latest
+```

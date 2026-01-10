@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block title %}KTH Works - Publication Record{% endblock %}
+
+{% block styles %}
+        /* Works page specific styles */
+        .metadata {
+            margin-bottom: 30px;
+        }
+
+        .field {
+            margin-bottom: 15px;
+            display: flex;
+            gap: 10px;
+        }
+
+        .label {
+            font-weight: bold;
+            color: var(--fg);
+            min-width: 120px;
+            flex-shrink: 0;
+        }
+
+        .value {
+            color: var(--fg-muted);
+        }
+
+        .authors {
+            color: var(--link);
+        }
+
+        .keywords {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 5px;
+        }
+
+        .actions {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+
+        .identifiers {
+            background: var(--highlight-bg);
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 3px;
+        }
+
+        .identifiers h3 {
+            font-size: 16px;
+            margin-bottom: 10px;
+            color: var(--accent-dark);
+        }
+
+        /* Logo sizing */
+        .kth-works-logo {
+            max-width: 300px;
+            height: auto;
+            margin-bottom: 20px;
+        }
+
+        @media (max-width: 600px) {
+            .field {
+                flex-direction: column;
+                gap: 5px;
+            }
+
+            .label {
+                min-width: auto;
+            }
+        }
+{% endblock %}
+
+{% block body %}
+    <div class="container">
+
+{% include "logo.html" %}
+
+        <div class="metadata">
+            <div class="field">
+                <span class="label">Title:</span>
+                <h2><span class="value"><a href="https://kth.diva-portal.org/smash/record.jsf?pid=diva2:{{ id }}">{{ Title }}</a></span></h2>
+            </div>
+
+            <div class="abstract">
+                <h2>Abstract</h2>
+                {{ Abstract }}
+            </div>
+
+            <div class="field">
+                <span class="label">Keywords:</span>
+                <div class="keywords">
+                    <span class="keyword">{{ Keywords }}</span>
+                </div>
+                <span class="label">Categories:</span>
+                <div class="keywords">
+                    <span class="keyword">{{ Categories }}</span>
+                </div>
+
+            </div>
+
+            <div class="field">
+                <span class="label">Authors:</span>
+                <span class="value authors">{{ Name }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Contributors:</span>
+                <span class="value authors"></span>
+            </div>
+
+            <div class="field">
+                <span class="label">Year:</span>
+                <span class="value">{{ Year }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Dates:</span>
+                <span class="value">Created: {{ CreatedDate }}</span>
+                <span class="value">Published: {{ PublicationDate }}</span>
+                <span class="value">Updated: {{ LastUpdated }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Status:</span>
+                <span class="value">{{ Status }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Type:</span>
+                <span class="value">{{ PublicationType }} / {{ PublicationSubType }}, {{ ContentType }}</span>
+                <span class="label">Language:</span>
+                <span class="value">{{ Language }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Publisher:</span>
+                <span class="value">Host Publication:{{ HostPublication }} Publisher:{{ Publisher }} Publication year:{{ Year }}</span>
+
+                <span class="label">Biblio:</span>
+                <span class="value">Journal:{{ Journal }} Volume:{{ Volume }} Issue:{{ Issue }} Pages:{{ Pages }} Start page:{{ StartPage }} End page:{{ EndPage }}</span>
+
+                <span class="label">Series/Journal (E)ISSN:</span>
+                <span class="value">ISSN:{{ JournalISSN }} EISSN:{{ JournalEISSN }} {{ Series }} {{ SeriesISSN }} {{ SeriesEISSN }} {{ ArticleId }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Context:</span>
+                <span class="value">{{ Conference }} {{ City }}</span>
+            </div>
+
+            <div class="field">
+            </div>
+
+        </div>
+
+
+        <div class="abstract">
+            <h2>Curation Notes</h2>
+            <pre>{{ Notes }}</pre>
+        </div>
+
+        <div class="identifiers">
+
+            <h3>Links</h3>
+
+            <div class="field">
+                <span class="label">Full Text:</span>
+                <span class="value">{% if fulltext_url %}<li><a href="{{ FullTextLink }}">Full Text (PDF)</a></li>{% endif %}</span>
+                <span class="value">{{ FreeFulltext }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">MODS:</span>
+                <span class="value">{% if id %}<dt>MODS:</dt> <dd><a href="https://kth.diva-portal.org/smash/references?referenceFormat=MODS&pids=diva2%3A{{ id }}">{{ id }}</a></dd>{% endif %}</span>
+            </div>
+
+        </div>
+
+        <div class="field">
+            <span class="label">Educational context:</span>
+            <span class="value">
+<pre>
+
+
+Research Subjects: {{ ResearchSubjects }}
+Subject: {{ Subject }}
+Projects: {{ Projects }}
+
+Opponents: {{ Opponents }}
+Supervisors: {{ Supervisors }}
+Examiners: {{ Examiners }}
+
+Credits: {{ Credits }}
+Programme: {{ Programme }}
+Term: {{ Term }}
+Frida level: {{ FridaLevel }}
+
+Uppsok: {{ Uppsok }}
+Thesis Level: {{ ThesisLevel }}
+Part of thesis: {{ PartOfThesis }}
+
+Defence location: {{ DefencePlace }}
+Defence language: {{ DefenceLanguage }}
+Defence date: {{ DefenceDate }}
+
+
+</pre>
+            </span>
+        </div>
+
+
+        <div class="identifiers">
+
+            <h3>Identifiers</h3>
+
+            <div class="field">
+                <span class="label">DOI:</span>
+                <span class="value">{% if DOI %}<a href='https://doi.org/{{ DOI }}'>https://doi.org/{{ DOI }}</a>{% endif %}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">ISI:</span>
+                <span class="value">{{ ISI }}</a></span>
+            </div>
+
+            <div class="field">
+                <span class="label">ISBN:</span>
+                <span class="value">{{ ISBN }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">ISRN:</span>
+                <span class="value">{{ ISRN }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">ScopusId:</span>
+                <span class="value">{{ ScopusId }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">PMID:</span>
+                <span class="value">{{ PMID }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">NBN:</span>
+                <span class="value">{{ NBN }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Urls:</span>
+                <span class="value">{{ Urls }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">LocalId:</span>
+                <span class="value">{{ LocalId }}</span>
+            </div>
+
+            <div class="field">
+                <span class="label">Archive Number:</span>
+                <span class="value">{{ ArchiveNumber }}</span>
+            </div>
+
+        </div>
+
+        <div class="actions">
+            <button class="btn" onclick="window.print()">Print</button>
+            <button class="btn btn-secondary" onclick="exportCitation()">Export Citation</button>
+            <button class="btn btn-secondary" onclick="alert('Full text access would be available here')">Full Text</button>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        function exportCitation() {
+            const citation = `{{ Name }} {{ Year }} {{ Title }} {{ Volume }}`;
+
+            const blob = new Blob([citation], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'citation.txt';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+    </script>
+{% endblock %}

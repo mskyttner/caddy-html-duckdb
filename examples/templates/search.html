@@ -1,0 +1,38 @@
+{# Search results fragment - inherits CSS variables from base.html via index.html #}
+{% if query %}
+<p style="margin-bottom: 1rem; color: var(--fg-muted);">
+    Results for: <strong>"{{ query }}"</strong>
+    {% if total_results %}({{ total_results }} found){% endif %}
+</p>
+{% endif %}
+
+{% if items and items | length > 0 %}
+<ul class="item-list">
+    {% for item in items %}
+    <li class="item">
+        <h2 class="item-title">
+            <a href="{{ base_path | default(value='') }}/{{ item.id }}">
+                <pre>{{ item.title | default(value=item.id) }}</pre>
+            </a>
+        </h2>
+        {% if item.snippet %}
+        <p class="item-snippet">...{{ item.snippet }}...</p>
+        {% endif %}
+        <div class="item-meta">
+            {% if item.score %}
+            Score: <span class="score" title="Relevance score">{{ item.score | round(precision=2) }}</span>
+            {% endif %}
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+{% elif query %}
+<div class="empty-state">
+    <p>No results found for "{{ query }}"</p>
+    <p><a href="{{ base_path | default(value='') }}/">View all pages</a></p>
+</div>
+{% else %}
+<div class="empty-state">
+    <p>Enter a search term above.</p>
+</div>
+{% endif %}

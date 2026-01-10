@@ -1,0 +1,100 @@
+{# KTH Works Logo - Includable SVG partial
+   Usage: {% include "logo.html" %}
+
+   This logo uses CSS variables from base.html for theming:
+   - --accent: Primary brand color (KTH blue in light mode)
+   - --accent-light: Light accent for fills
+
+   The SVG adapts to light/dark mode automatically.
+#}
+<svg class="kth-works-logo" viewBox="0 0 400 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="KTH Works logo">
+  <defs>
+    <style>
+      .logo-text {
+        font-family: 'Figtree', Arial, sans-serif;
+        font-weight: 700;
+        font-size: 32px;
+        fill: var(--accent, #004791);
+      }
+
+      .logo-text-kth {
+        font-family: 'Figtree', Arial, sans-serif;
+        font-weight: 600;
+        font-size: 32px;
+        fill: var(--accent, #004791);
+      }
+
+      .tagline {
+        font-family: 'Figtree', Arial, sans-serif;
+        font-weight: 400;
+        font-size: 12px;
+        fill: var(--accent, #004791);
+        letter-spacing: 0.5px;
+      }
+
+      .icon-accent {
+        fill: none;
+        stroke: var(--accent, #004791);
+        stroke-width: 3;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+
+      .icon-fill {
+        fill: var(--accent-light, #EBE5E0);
+      }
+
+      .icon-lines {
+        stroke: var(--accent, #004791);
+        stroke-width: 1.5;
+        opacity: 0.4;
+      }
+
+      .decorative-line {
+        stroke: var(--accent, #004791);
+        stroke-width: 1;
+        opacity: 0.3;
+      }
+    </style>
+
+    <!-- Filter for subtle shadow -->
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.15"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Decorative element - abstract book/document icon -->
+  <g transform="translate(20, 25)">
+    <!-- Book pages -->
+    <rect x="0" y="10" width="35" height="45" rx="2" class="icon-accent icon-fill" stroke-width="2.5"/>
+    <line x1="17.5" y1="10" x2="17.5" y2="55" class="icon-accent" stroke-width="2"/>
+
+    <!-- Small document lines inside -->
+    <line x1="6" y1="22" x2="29" y2="22" class="icon-lines"/>
+    <line x1="6" y1="30" x2="29" y2="30" class="icon-lines"/>
+    <line x1="6" y1="38" x2="24" y2="38" class="icon-lines"/>
+  </g>
+
+  <!-- Main logo text -->
+  <g filter="url(#softShadow)">
+    <text x="70" y="60" class="logo-text">
+      <tspan class="logo-text-kth">KTH</tspan><tspan class="logo-text"> Works</tspan>
+    </text>
+  </g>
+
+  <!-- Tagline -->
+  <text x="70" y="75" class="tagline">
+    Corpus Curation - "KaTHarsis"
+  </text>
+
+  <!-- Subtle decorative line -->
+  <line x1="70" y1="80" x2="250" y2="80" class="decorative-line"/>
+</svg>

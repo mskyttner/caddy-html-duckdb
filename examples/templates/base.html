@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}KTH Works{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+    {% block head %}{% endblock %}
+    <style>
+        /* KTH Works - Shared CSS Variables
+         * Light mode is default, dark mode via prefers-color-scheme
+         */
+        :root {
+            /* Brand colors - KTH Blue */
+            --kth-blue: #004791;
+            --kth-blue-dark: #003366;
+            --kth-blue-light: #e6f2ff;
+
+            /* Semantic colors - Light mode (default) */
+            --bg: #f5f5f5;
+            --bg-card: #ffffff;
+            --fg: #222222;
+            --fg-muted: #666666;
+            --link: #0066cc;
+            --link-hover: #004080;
+            --border: #dddddd;
+            --border-light: #eeeeee;
+
+            /* Component colors */
+            --accent: var(--kth-blue);
+            --accent-dark: var(--kth-blue-dark);
+            --accent-light: var(--kth-blue-light);
+
+            /* Abstract/highlight background */
+            --highlight-bg: #f9f9f9;
+            --highlight-border: var(--kth-blue-dark);
+
+            /* Shadows */
+            --shadow: rgba(0, 0, 0, 0.1);
+            --shadow-hover: rgba(0, 0, 0, 0.15);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1a1a1a;
+                --bg-card: #2a2a2a;
+                --fg: #eeeeee;
+                --fg-muted: #999999;
+                --link: #6ab0f3;
+                --link-hover: #8fc4f7;
+                --border: #444444;
+                --border-light: #333333;
+
+                --accent-light: #1a3a5c;
+                --highlight-bg: #252525;
+
+                --shadow: rgba(0, 0, 0, 0.3);
+                --shadow-hover: rgba(0, 0, 0, 0.4);
+            }
+        }
+
+        /* Reset and base styles */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Figtree', system-ui, -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        a {
+            color: var(--link);
+            text-decoration: none;
+        }
+
+        a:hover {
+            color: var(--link-hover);
+            text-decoration: underline;
+        }
+
+        /* Container */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: var(--bg-card);
+            padding: 30px;
+            box-shadow: 0 2px 8px var(--shadow);
+        }
+
+        /* Headings */
+        h1, h2, h3 {
+            color: var(--accent-dark);
+        }
+
+        h1 {
+            font-size: 24px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid var(--accent-dark);
+            padding-bottom: 10px;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            background: var(--accent-dark);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            text-decoration: none;
+            display: inline-block;
+            border-radius: 3px;
+            font-family: inherit;
+        }
+
+        .btn:hover {
+            background: var(--link-hover);
+            color: white;
+            text-decoration: none;
+        }
+
+        .btn-secondary {
+            background: var(--fg-muted);
+        }
+
+        .btn-secondary:hover {
+            background: var(--fg);
+        }
+
+        /* Keywords/tags */
+        .keyword, .tag {
+            background: var(--accent-light);
+            padding: 4px 12px;
+            border-radius: 3px;
+            font-size: 14px;
+            color: var(--accent-dark);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            .keyword, .tag {
+                color: var(--link);
+            }
+        }
+
+        /* Abstract/highlight boxes */
+        .abstract, .highlight-box {
+            background: var(--highlight-bg);
+            padding: 15px;
+            border-left: 4px solid var(--highlight-border);
+            margin: 20px 0;
+        }
+
+        .abstract h2, .highlight-box h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 15px;
+            }
+        }
+
+        {% block styles %}{% endblock %}
+    </style>
+</head>
+<body>
+    {% block body %}{% endblock %}
+    {% block scripts %}{% endblock %}
+</body>
+</html>
