@@ -119,6 +119,13 @@ type HTMLFromDuckDB struct {
 	// Supports multiline statements, single-line (--) and block (/* */) comments.
 	InitSQLFile string `json:"init_sql_file,omitempty"`
 
+	// RecordMacro is the name of a DuckDB table macro for rendering individual records.
+	// When set, the handler queries using: SELECT html FROM macro_name(id := 'value')
+	// instead of: SELECT html FROM table WHERE id = 'value'
+	// This enables on-the-fly rendering using Tera templates.
+	// The macro should accept an id parameter and return a single html column.
+	RecordMacro string `json:"record_macro,omitempty"`
+
 	db      *sql.DB
 	timeout time.Duration
 	logger  *zap.Logger
@@ -423,13 +430,28 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 	}
 
 	// Build query
-	query := fmt.Sprintf("SELECT %s FROM %s WHERE %s = ?",
-		sanitizeIdentifier(h.HTMLColumn),
-		sanitizeIdentifier(h.Table),
-		sanitizeIdentifier(h.IDColumn))
+	var query string
+	var useParams bool
 
-	if h.WhereClause != "" {
-		query += fmt.Sprintf(" AND (%s)", h.WhereClause)
+	if h.RecordMacro != "" {
+		// Use table macro: SELECT html FROM macro_name(id := 'escaped_value')
+		// DuckDB table macros don't support parameterized queries
+		query = fmt.Sprintf("SELECT %s FROM %s(id := '%s')",
+			sanitizeIdentifier(h.HTMLColumn),
+			sanitizeIdentifier(h.RecordMacro),
+			escapeSQLString(id))
+		useParams = false
+	} else {
+		// Traditional table query with parameterized ID
+		query = fmt.Sprintf("SELECT %s FROM %s WHERE %s = ?",
+			sanitizeIdentifier(h.HTMLColumn),
+			sanitizeIdentifier(h.Table),
+			sanitizeIdentifier(h.IDColumn))
+		useParams = true
+
+		if h.WhereClause != "" {
+			query += fmt.Sprintf(" AND (%s)", h.WhereClause)
+		}
 	}
 
 	h.logger.Debug("executing query",
@@ -445,7 +467,12 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 	}
 
 	var html string
-	err := h.db.QueryRowContext(ctx, query, id).Scan(&html)
+	var err error
+	if useParams {
+		err = h.db.QueryRowContext(ctx, query, id).Scan(&html)
+	} else {
+		err = h.db.QueryRowContext(ctx, query).Scan(&html)
+	}
 	if err != nil {
 		if err == sql.ErrNoRows {
 			h.logger.Debug("content not found", zap.String("id", id))
@@ -736,6 +763,12 @@ func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.ArgErr()
 				}
 				h.InitSQLFile = d.Val()
+
+			case "record_macro":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				h.RecordMacro = d.Val()
 
 			default:
 				return d.Errf("unrecognized subdirective: %s", d.Val())
