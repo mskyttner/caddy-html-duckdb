@@ -759,16 +759,16 @@ func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				h.BasePath = d.Val()
 
 			case "init_sql_file":
-				if !d.NextArg() {
-					return d.ArgErr()
+				if d.NextArg() {
+					h.InitSQLFile = d.Val()
 				}
-				h.InitSQLFile = d.Val()
+				// No error if empty - allows {$INIT_SQL_COMMANDS_FILE:} with empty default
 
 			case "record_macro":
-				if !d.NextArg() {
-					return d.ArgErr()
+				if d.NextArg() {
+					h.RecordMacro = d.Val()
 				}
-				h.RecordMacro = d.Val()
+				// No error if empty - allows {$RECORD_MACRO:} with empty default
 
 			default:
 				return d.Errf("unrecognized subdirective: %s", d.Val())

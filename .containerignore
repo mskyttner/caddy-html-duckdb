@@ -1,0 +1,21 @@
+# Ignore data directory with potentially large database files
+data/
+
+# Ignore built binary
+caddy
+
+# Ignore git
+.git/
+.gitignore
+
+# Ignore IDE/editor files
+.claude/
+.vscode/
+*.swp
+*.swo
+
+# Ignore markdown docs
+*.md
+
+# Ignore local Caddyfile (container uses Caddyfile.default)
+Caddyfile
