@@ -335,6 +335,35 @@ docker run -p 8080:8080 \
 
 Place your `init.sql` file in the mounted `/srv` directory alongside your database.
 
+## Podman / Podman-Compose
+
+Rootless podman uses user namespace mapping, which means container UIDs map to different UIDs on the host. To use files owned by your user, add `userns_mode: keep-id` to your compose.yaml:
+
+```yaml
+services:
+  myservice:
+    image: ghcr.io/mskyttner/caddy-html-duckdb:main
+    userns_mode: keep-id
+    volumes:
+      - ./data:/srv
+    # ... other config
+```
+
+Run with `--in-pod=false` (required when using `userns_mode`):
+
+```bash
+podman-compose --in-pod=false up
+```
+
+This maps your host UID directly to the container UID, so files owned by your user are accessible inside the container.
+
+**Alternative:** If you prefer using podman's default pod mode, you can instead set file ownership to the mapped UID:
+
+```bash
+podman unshare chown -R 1000:1000 ./data
+podman-compose up
+```
+
 ## Troubleshooting
 
 ### Permission Denied with Rootless Podman/Docker
