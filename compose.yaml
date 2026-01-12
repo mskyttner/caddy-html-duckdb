@@ -1,0 +1,18 @@
+services:
+
+  katharsis:
+    image: ghcr.io/mskyttner/caddy-html-duckdb:main
+    environment:
+      - READ_ONLY=false
+      - DATABASE_PATH=rendered_works.db
+      - INIT_SQL_COMMANDS_FILE=.duckdbrc
+      - ROUTE_PATH=/works/*
+      - TABLE=html
+      - ID_COLUMN=id
+      - INDEX_ENABLED=true
+      - SEARCH_ENABLED=true
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./data:/srv:Z
+ 
