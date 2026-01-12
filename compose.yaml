@@ -2,6 +2,7 @@ services:
 
   katharsis:
     image: ghcr.io/mskyttner/caddy-html-duckdb:main
+    userns_mode: keep-id
     environment:
       - READ_ONLY=false
       - DATABASE_PATH=rendered_works.db
@@ -14,5 +15,5 @@ services:
     ports:
       - "8090:8080"
     volumes:
-      - ./data:/srv:Z
+      - ./data:/srv
  
