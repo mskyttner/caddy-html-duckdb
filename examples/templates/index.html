@@ -120,7 +120,7 @@
 
     {% if search_enabled %}
     <div class="search-container">
-        <form class="search-box" hx-get="{{ search_endpoint | default(value='/search') }}"
+        <form class="search-box" hx-get="{{ base_path | default(value='') }}"
               hx-target="#search-results"
               hx-trigger="submit"
               hx-indicator=".htmx-indicator">
@@ -128,7 +128,7 @@
                    name="q"
                    placeholder="Search content..."
                    autocomplete="off"
-                   hx-get="{{ search_endpoint | default(value='/search') }}"
+                   hx-get="{{ base_path | default(value='') }}"
                    hx-target="#search-results"
                    hx-trigger="input changed delay:300ms, search"
                    hx-indicator=".htmx-indicator">
