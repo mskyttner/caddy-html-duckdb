@@ -28,6 +28,10 @@ html_from_duckdb {
     search_param <name>            # Query parameter for search (default: "q")
     init_sql_file <path>           # SQL file to execute on startup (optional)
     record_macro <name>            # DuckDB macro for on-the-fly record rendering (optional)
+    base_path <path>               # Base URL path for links and health endpoint (optional)
+    health_enabled <bool>          # Enable health check endpoint (default: false)
+    health_path <name>             # Health endpoint path relative to base_path (default: "_health")
+    health_detailed <bool>         # Include pool stats in health response (default: false)
 }
 ```
 
@@ -108,6 +112,10 @@ docker run -p 8080:8080 \
 | `SEARCH_PARAM` | `q` | Query parameter for search |
 | `INIT_SQL_COMMANDS_FILE` | (none) | SQL file to execute on startup |
 | `RECORD_MACRO` | (none) | DuckDB macro for on-the-fly record rendering |
+| `BASE_PATH` | (none) | Base URL path for links and health endpoint |
+| `HEALTH_ENABLED` | `false` | Enable health check endpoint |
+| `HEALTH_PATH` | `_health` | Health endpoint path relative to base_path |
+| `HEALTH_DETAILED` | `false` | Include pool stats in health response |
 | `LOG_FORMAT` | `console` | Log format (`console` or `json`) |
 | `LOG_LEVEL` | `INFO` | Log level (`DEBUG`, `INFO`, `WARN`, `ERROR`) |
 
@@ -287,6 +295,101 @@ docker run -p 8080:8080 \
 | Performance | Faster (no rendering) | Slower (rendering per request) |
 
 **Note:** When `record_macro` is set, the `table`, `id_column`, and `where_clause` directives are ignored for individual record queries. Index and search still use their respective macros.
+
+## Health Check
+
+The health check endpoint provides a way to monitor the service status for container orchestration (Kubernetes, Docker healthchecks) and load balancers.
+
+### Configuration
+
+Enable the health check by setting `health_enabled` to `true`:
+
+```caddyfile
+html_from_duckdb {
+    database_path works.db
+    table html
+    base_path /works
+    health_enabled true
+    health_path _health
+    health_detailed true
+}
+```
+
+The health endpoint will be available at `{base_path}/{health_path}` (e.g., `/works/_health`).
+
+### Response Format
+
+```json
+{
+  "status": "healthy",
+  "checks": {
+    "database": {"status": "ok", "latency_ms": 2},
+    "table": {"status": "ok", "name": "html", "latency_ms": 1},
+    "index_macro": {"status": "ok", "name": "render_index", "latency_ms": 1},
+    "search_macro": {"status": "ok", "name": "render_search", "latency_ms": 1},
+    "record_macro": {"status": "ok", "name": "render_record", "latency_ms": 1}
+  },
+  "pool": {
+    "open_connections": 3,
+    "in_use": 1,
+    "idle": 2
+  }
+}
+```
+
+- Returns HTTP 200 for healthy, 503 for unhealthy
+- `pool` stats only included when `health_detailed` is `true`
+- Macro checks only appear when the respective feature is enabled/configured
+
+### What Gets Checked
+
+| Check | Condition | Description |
+|-------|-----------|-------------|
+| `database` | Always | Database connectivity via ping |
+| `table` | Always | Table accessibility |
+| `index_macro` | `index_enabled=true` | Index macro exists |
+| `search_macro` | `search_enabled=true` | Search macro exists |
+| `record_macro` | `record_macro` configured | Record macro exists |
+
+### Container Healthcheck Example
+
+```yaml
+services:
+  caddy:
+    image: ghcr.io/mskyttner/caddy-html-duckdb:main
+    environment:
+      DATABASE_PATH: works.db
+      TABLE: html
+      BASE_PATH: /works
+      ROUTE_PATH: /works/*
+      INDEX_ENABLED: "true"
+      SEARCH_ENABLED: "true"
+      HEALTH_ENABLED: "true"
+      HEALTH_PATH: _health
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/works/_health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+```
+
+### Kubernetes Probes
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /works/_health
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 30
+readinessProbe:
+  httpGet:
+    path: /works/_health
+    port: 8080
+  initialDelaySeconds: 3
+  periodSeconds: 10
+```
 
 ## Initialization SQL File
 

@@ -8,12 +8,21 @@ services:
       - DATABASE_PATH=rendered_works.db
       - INIT_SQL_COMMANDS_FILE=.duckdbrc
       - ROUTE_PATH=/works/*
+      - BASE_PATH=/works
       - TABLE=html
       - ID_COLUMN=id
       - INDEX_ENABLED=true
       - SEARCH_ENABLED=true
+      - HEALTH_ENABLED=true
+      - HEALTH_PATH=_health
     ports:
       - "8090:8080"
     volumes:
       - ./data:/srv
- 
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/works/_health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
