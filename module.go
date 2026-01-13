@@ -7,6 +7,7 @@ import (
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -126,6 +127,18 @@ type HTMLFromDuckDB struct {
 	// The macro should accept an id parameter and return a single html column.
 	RecordMacro string `json:"record_macro,omitempty"`
 
+	// HealthEnabled enables a health check endpoint.
+	// Default: false
+	HealthEnabled bool `json:"health_enabled,omitempty"`
+
+	// HealthPath is the path for the health check endpoint, relative to BasePath.
+	// Default: "_health"
+	HealthPath string `json:"health_path,omitempty"`
+
+	// HealthDetailed includes connection pool stats and latencies in the response.
+	// Default: false
+	HealthDetailed bool `json:"health_detailed,omitempty"`
+
 	db      *sql.DB
 	timeout time.Duration
 	logger  *zap.Logger
@@ -168,6 +181,9 @@ func (h *HTMLFromDuckDB) Provision(ctx caddy.Context) error {
 	}
 	if h.SearchParam == "" {
 		h.SearchParam = "q"
+	}
+	if h.HealthPath == "" {
+		h.HealthPath = "_health"
 	}
 
 	// Parse timeout
@@ -227,7 +243,8 @@ func (h *HTMLFromDuckDB) Provision(ctx caddy.Context) error {
 		zap.String("table", h.Table),
 		zap.Bool("read_only", *h.ReadOnly),
 		zap.Bool("index_enabled", h.IndexEnabled),
-		zap.Bool("search_enabled", h.SearchEnabled))
+		zap.Bool("search_enabled", h.SearchEnabled),
+		zap.Bool("health_enabled", h.HealthEnabled))
 
 	return nil
 }
@@ -397,6 +414,17 @@ func truncateForLog(s string, maxLen int) string {
 
 // ServeHTTP serves HTML content from DuckDB.
 func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// Check for health endpoint first
+	if h.HealthEnabled {
+		healthPath := "/" + h.HealthPath
+		if h.BasePath != "" {
+			healthPath = h.BasePath + "/" + h.HealthPath
+		}
+		if r.URL.Path == healthPath {
+			return h.serveHealth(w, r)
+		}
+	}
+
 	// Check for search query first
 	searchQuery := r.URL.Query().Get(h.SearchParam)
 	if searchQuery != "" && h.SearchEnabled {
@@ -647,6 +675,219 @@ func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, sea
 	return nil
 }
 
+// HealthResponse represents the JSON structure of a health check response.
+type HealthResponse struct {
+	Status string                  `json:"status"`
+	Checks map[string]*CheckResult `json:"checks"`
+	Pool   *PoolStats              `json:"pool,omitempty"`
+}
+
+// CheckResult represents the result of a single health check.
+type CheckResult struct {
+	Status    string `json:"status"`
+	Name      string `json:"name,omitempty"`
+	LatencyMs int64  `json:"latency_ms,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// PoolStats represents database connection pool statistics.
+type PoolStats struct {
+	OpenConnections int `json:"open_connections"`
+	InUse           int `json:"in_use"`
+	Idle            int `json:"idle"`
+}
+
+// serveHealth serves the health check endpoint.
+func (h *HTMLFromDuckDB) serveHealth(w http.ResponseWriter, r *http.Request) error {
+	response := HealthResponse{
+		Status: "healthy",
+		Checks: make(map[string]*CheckResult),
+	}
+
+	allHealthy := true
+
+	// Check database connectivity
+	dbCheck := h.checkDatabase(r.Context())
+	response.Checks["database"] = dbCheck
+	if dbCheck.Status != "ok" {
+		allHealthy = false
+	}
+
+	// Check table accessibility
+	tableCheck := h.checkTable(r.Context())
+	response.Checks["table"] = tableCheck
+	if tableCheck.Status != "ok" {
+		allHealthy = false
+	}
+
+	// Check index macro if enabled
+	if h.IndexEnabled {
+		indexCheck := h.checkMacro(r.Context(), h.IndexMacro, "index_macro")
+		response.Checks["index_macro"] = indexCheck
+		if indexCheck.Status != "ok" {
+			allHealthy = false
+		}
+	}
+
+	// Check search macro if enabled
+	if h.SearchEnabled {
+		searchCheck := h.checkMacro(r.Context(), h.SearchMacro, "search_macro")
+		response.Checks["search_macro"] = searchCheck
+		if searchCheck.Status != "ok" {
+			allHealthy = false
+		}
+	}
+
+	// Check record macro if configured
+	if h.RecordMacro != "" {
+		recordCheck := h.checkMacro(r.Context(), h.RecordMacro, "record_macro")
+		response.Checks["record_macro"] = recordCheck
+		if recordCheck.Status != "ok" {
+			allHealthy = false
+		}
+	}
+
+	// Add pool stats if detailed mode is enabled
+	if h.HealthDetailed {
+		stats := h.db.Stats()
+		response.Pool = &PoolStats{
+			OpenConnections: stats.OpenConnections,
+			InUse:           stats.InUse,
+			Idle:            stats.Idle,
+		}
+	}
+
+	if !allHealthy {
+		response.Status = "unhealthy"
+	}
+
+	// Determine HTTP status code
+	statusCode := http.StatusOK
+	if !allHealthy {
+		statusCode = http.StatusServiceUnavailable
+	}
+
+	// Marshal response
+	jsonResponse, err := json.Marshal(response)
+	if err != nil {
+		h.logger.Error("failed to marshal health response", zap.Error(err))
+		return caddyhttp.Error(http.StatusInternalServerError, err)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Length", strconv.Itoa(len(jsonResponse)))
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.WriteHeader(statusCode)
+
+	if _, err := w.Write(jsonResponse); err != nil {
+		h.logger.Error("failed to write health response", zap.Error(err))
+		return err
+	}
+
+	h.logger.Debug("served health check",
+		zap.String("status", response.Status),
+		zap.Int("status_code", statusCode))
+
+	return nil
+}
+
+// checkDatabase verifies database connectivity with a ping.
+func (h *HTMLFromDuckDB) checkDatabase(ctx context.Context) *CheckResult {
+	start := time.Now()
+
+	if h.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+	}
+
+	err := h.db.PingContext(ctx)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return &CheckResult{
+			Status:    "error",
+			LatencyMs: latency,
+			Error:     err.Error(),
+		}
+	}
+
+	return &CheckResult{
+		Status:    "ok",
+		LatencyMs: latency,
+	}
+}
+
+// checkTable verifies the table is accessible.
+func (h *HTMLFromDuckDB) checkTable(ctx context.Context) *CheckResult {
+	start := time.Now()
+
+	if h.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+	}
+
+	query := fmt.Sprintf("SELECT 1 FROM %s LIMIT 1", sanitizeIdentifier(h.Table))
+	_, err := h.db.ExecContext(ctx, query)
+	latency := time.Since(start).Milliseconds()
+
+	if err != nil {
+		return &CheckResult{
+			Status:    "error",
+			Name:      h.Table,
+			LatencyMs: latency,
+			Error:     err.Error(),
+		}
+	}
+
+	return &CheckResult{
+		Status:    "ok",
+		Name:      h.Table,
+		LatencyMs: latency,
+	}
+}
+
+// checkMacro verifies a DuckDB macro exists by querying duckdb_functions().
+func (h *HTMLFromDuckDB) checkMacro(ctx context.Context, macroName, checkName string) *CheckResult {
+	start := time.Now()
+
+	if h.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+	}
+
+	// Query DuckDB's function catalog to check if macro exists
+	query := "SELECT 1 FROM duckdb_functions() WHERE function_name = ? AND function_type = 'table_macro' LIMIT 1"
+	var exists int
+	err := h.db.QueryRowContext(ctx, query, macroName).Scan(&exists)
+	latency := time.Since(start).Milliseconds()
+
+	if err == sql.ErrNoRows {
+		return &CheckResult{
+			Status:    "error",
+			Name:      macroName,
+			LatencyMs: latency,
+			Error:     "macro not found",
+		}
+	}
+	if err != nil {
+		return &CheckResult{
+			Status:    "error",
+			Name:      macroName,
+			LatencyMs: latency,
+			Error:     err.Error(),
+		}
+	}
+
+	return &CheckResult{
+		Status:    "ok",
+		Name:      macroName,
+		LatencyMs: latency,
+	}
+}
+
 // UnmarshalCaddyfile implements caddyfile.Unmarshaler.
 func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 	for d.Next() {
@@ -769,6 +1010,24 @@ func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					h.RecordMacro = d.Val()
 				}
 				// No error if empty - allows {$RECORD_MACRO:} with empty default
+
+			case "health_enabled":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				h.HealthEnabled = d.Val() == "true"
+
+			case "health_path":
+				if d.NextArg() {
+					h.HealthPath = d.Val()
+				}
+				// No error if empty - allows {$HEALTH_PATH:} with empty default
+
+			case "health_detailed":
+				if !d.NextArg() {
+					return d.ArgErr()
+				}
+				h.HealthDetailed = d.Val() == "true"
 
 			default:
 				return d.Errf("unrecognized subdirective: %s", d.Val())

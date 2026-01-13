@@ -21,6 +21,10 @@
 			search_param {$SEARCH_PARAM:q}
 			init_sql_file {$INIT_SQL_COMMANDS_FILE:}
 			record_macro {$RECORD_MACRO:}
+			base_path {$BASE_PATH:}
+			health_enabled {$HEALTH_ENABLED:false}
+			health_path {$HEALTH_PATH:_health}
+			health_detailed {$HEALTH_DETAILED:false}
 		}
 	}
 }

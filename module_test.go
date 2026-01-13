@@ -761,3 +761,226 @@ func TestServeHTTP_RecordMacro(t *testing.T) {
 		}
 	})
 }
+
+func TestServeHTTP_Health(t *testing.T) {
+	// Create in-memory DuckDB database with test data
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create test macros
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_index(page := 1, base_path := '') AS TABLE
+		SELECT '<html>Index Page ' || page || '</html>' AS html
+	`)
+	if err != nil {
+		t.Fatalf("failed to create index macro: %v", err)
+	}
+
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_search(term := '', base_path := '') AS TABLE
+		SELECT '<html>Search: ' || term || '</html>' AS html
+	`)
+	if err != nil {
+		t.Fatalf("failed to create search macro: %v", err)
+	}
+
+	t.Run("returns healthy status when all checks pass", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:            db,
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"status":"healthy"`) {
+			t.Errorf("response should contain healthy status, got %q", body)
+		}
+		if !strings.Contains(body, `"database"`) {
+			t.Errorf("response should contain database check, got %q", body)
+		}
+		if !strings.Contains(body, `"table"`) {
+			t.Errorf("response should contain table check, got %q", body)
+		}
+	})
+
+	t.Run("includes macro checks when enabled", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:            db,
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			IndexEnabled:  true,
+			IndexMacro:    "render_index",
+			SearchEnabled: true,
+			SearchMacro:   "render_search",
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"index_macro"`) {
+			t.Errorf("response should contain index_macro check, got %q", body)
+		}
+		if !strings.Contains(body, `"search_macro"`) {
+			t.Errorf("response should contain search_macro check, got %q", body)
+		}
+	})
+
+	t.Run("returns unhealthy when macro missing", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:            db,
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			IndexEnabled:  true,
+			IndexMacro:    "nonexistent_macro",
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"status":"unhealthy"`) {
+			t.Errorf("response should contain unhealthy status, got %q", body)
+		}
+		if !strings.Contains(body, `"macro not found"`) {
+			t.Errorf("response should contain error message, got %q", body)
+		}
+	})
+
+	t.Run("includes pool stats when detailed enabled", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:             db,
+			Table:          "html",
+			HTMLColumn:     "html",
+			IDColumn:       "id",
+			HealthEnabled:  true,
+			HealthPath:     "_health",
+			HealthDetailed: true,
+			logger:         zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"pool"`) {
+			t.Errorf("response should contain pool stats, got %q", body)
+		}
+		if !strings.Contains(body, `"open_connections"`) {
+			t.Errorf("response should contain open_connections, got %q", body)
+		}
+	})
+
+	t.Run("respects base_path for health endpoint", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:            db,
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			BasePath:      "/works",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			logger:        zap.NewNop(),
+		}
+
+		// Request without base_path should not match
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		// This should return error since /_health doesn't match /works/_health
+		if err == nil {
+			t.Error("expected error for non-matching health path")
+		}
+
+		// Request with base_path should match
+		req2 := httptest.NewRequest(http.MethodGet, "/works/_health", nil)
+		rec2 := httptest.NewRecorder()
+
+		err = handler.ServeHTTP(rec2, req2, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec2.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec2.Code, http.StatusOK)
+		}
+	})
+
+	t.Run("does not serve health when disabled", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			db:            db,
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			HealthEnabled: false,
+			HealthPath:    "_health",
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		// Should return error (400 Bad Request for missing ID) since health is disabled
+		if err == nil {
+			t.Error("expected error when health is disabled")
+		}
+	})
+}
