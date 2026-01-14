@@ -984,3 +984,289 @@ func TestServeHTTP_Health(t *testing.T) {
 		}
 	})
 }
+
+func TestServeHTTP_TableMacro(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create a table macro that returns multiple columns
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_chart(max_items := 10, base_path := '') AS TABLE
+		SELECT
+			'Item ' || i as name,
+			i * 10 as value,
+			repeat('█', i) as chart
+		FROM range(1, max_items + 1) t(i)
+	`)
+	if err != nil {
+		t.Fatalf("failed to create table macro: %v", err)
+	}
+
+	handler := &HTMLFromDuckDB{
+		Table:      "html",
+		HTMLColumn: "html",
+		IDColumn:   "id",
+		TableMacro: "render_chart",
+		TablePath:  "_chart",
+		db:         db,
+		logger:     zap.NewNop(),
+	}
+
+	t.Run("serves table from macro", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/_chart", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `<pre class="duckbox">`) {
+			t.Errorf("body should contain <pre class=\"duckbox\">, got %q", body)
+		}
+		if !strings.Contains(body, "name") {
+			t.Errorf("body should contain column name 'name', got %q", body)
+		}
+		if !strings.Contains(body, "value") {
+			t.Errorf("body should contain column name 'value', got %q", body)
+		}
+		if !strings.Contains(body, "Item 1") {
+			t.Errorf("body should contain 'Item 1', got %q", body)
+		}
+	})
+
+	t.Run("passes query params to macro", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/_chart?max_items=3", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		body := rec.Body.String()
+		// With max_items=3, should have Item 1, 2, 3 but not Item 4
+		if !strings.Contains(body, "Item 3") {
+			t.Errorf("body should contain 'Item 3', got %q", body)
+		}
+		if strings.Contains(body, "Item 4") {
+			t.Errorf("body should NOT contain 'Item 4' with max_items=3, got %q", body)
+		}
+	})
+
+	t.Run("sets correct headers", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/_chart", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if ct := rec.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+			t.Errorf("Content-Type = %q, want %q", ct, "text/html; charset=utf-8")
+		}
+		if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Errorf("Cache-Control = %q, want %q", cc, "no-cache")
+		}
+	})
+
+	t.Run("respects base_path for table endpoint", func(t *testing.T) {
+		handlerWithBase := &HTMLFromDuckDB{
+			Table:      "html",
+			HTMLColumn: "html",
+			IDColumn:   "id",
+			TableMacro: "render_chart",
+			TablePath:  "_chart",
+			BasePath:   "/works",
+			db:         db,
+			logger:     zap.NewNop(),
+		}
+
+		// Request without base_path should not match
+		req := httptest.NewRequest(http.MethodGet, "/_chart", nil)
+		rec := httptest.NewRecorder()
+
+		err := handlerWithBase.ServeHTTP(rec, req, emptyNextHandler())
+		// Should return error since /_chart doesn't match /works/_chart
+		if err == nil {
+			t.Error("expected error for non-matching table path")
+		}
+
+		// Request with base_path should match
+		req2 := httptest.NewRequest(http.MethodGet, "/works/_chart", nil)
+		rec2 := httptest.NewRecorder()
+
+		err = handlerWithBase.ServeHTTP(rec2, req2, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec2.Code != http.StatusOK {
+			t.Errorf("status = %d, want %d", rec2.Code, http.StatusOK)
+		}
+	})
+}
+
+func TestServeHTTP_TableMacro_Alignment(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create a macro with mixed types
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO test_types(base_path := '') AS TABLE
+		SELECT
+			'text' as string_col,
+			42 as int_col,
+			3.14 as float_col
+	`)
+	if err != nil {
+		t.Fatalf("failed to create macro: %v", err)
+	}
+
+	handler := &HTMLFromDuckDB{
+		Table:      "html",
+		HTMLColumn: "html",
+		IDColumn:   "id",
+		TableMacro: "test_types",
+		TablePath:  "_types",
+		db:         db,
+		logger:     zap.NewNop(),
+	}
+
+	t.Run("formats table with correct structure", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/_types", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		body := rec.Body.String()
+		// Should contain all column names
+		if !strings.Contains(body, "string_col") {
+			t.Errorf("body should contain 'string_col', got %q", body)
+		}
+		if !strings.Contains(body, "int_col") {
+			t.Errorf("body should contain 'int_col', got %q", body)
+		}
+		if !strings.Contains(body, "float_col") {
+			t.Errorf("body should contain 'float_col', got %q", body)
+		}
+		// Should contain values
+		if !strings.Contains(body, "text") {
+			t.Errorf("body should contain 'text', got %q", body)
+		}
+		if !strings.Contains(body, "42") {
+			t.Errorf("body should contain '42', got %q", body)
+		}
+	})
+}
+
+func TestServeHTTP_TableMacro_Health(t *testing.T) {
+	db, err := sql.Open("duckdb", ":memory:")
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	// Create test table
+	_, err = db.Exec(`CREATE TABLE html (id VARCHAR, html VARCHAR)`)
+	if err != nil {
+		t.Fatalf("failed to create table: %v", err)
+	}
+
+	// Create a table macro
+	_, err = db.Exec(`
+		CREATE OR REPLACE MACRO render_chart(max_items := 10, base_path := '') AS TABLE
+		SELECT 'test' as name, 1 as value
+	`)
+	if err != nil {
+		t.Fatalf("failed to create macro: %v", err)
+	}
+
+	t.Run("includes table_macro in health check", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			TableMacro:    "render_chart",
+			TablePath:     "_chart",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			db:            db,
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"table_macro"`) {
+			t.Errorf("response should contain table_macro check, got %q", body)
+		}
+		if !strings.Contains(body, `"render_chart"`) {
+			t.Errorf("response should contain macro name, got %q", body)
+		}
+	})
+
+	t.Run("returns unhealthy when table_macro missing", func(t *testing.T) {
+		handler := &HTMLFromDuckDB{
+			Table:         "html",
+			HTMLColumn:    "html",
+			IDColumn:      "id",
+			TableMacro:    "nonexistent_macro",
+			TablePath:     "_chart",
+			HealthEnabled: true,
+			HealthPath:    "_health",
+			db:            db,
+			logger:        zap.NewNop(),
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/_health", nil)
+		rec := httptest.NewRecorder()
+
+		err := handler.ServeHTTP(rec, req, emptyNextHandler())
+		if err != nil {
+			t.Fatalf("ServeHTTP error: %v", err)
+		}
+
+		if rec.Code != http.StatusServiceUnavailable {
+			t.Errorf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+		}
+
+		body := rec.Body.String()
+		if !strings.Contains(body, `"status":"unhealthy"`) {
+			t.Errorf("response should contain unhealthy status, got %q", body)
+		}
+	})
+}
