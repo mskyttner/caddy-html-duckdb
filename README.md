@@ -28,6 +28,8 @@ html_from_duckdb {
     search_param <name>            # Query parameter for search (default: "q")
     init_sql_file <path>           # SQL file to execute on startup (optional)
     record_macro <name>            # DuckDB macro for on-the-fly record rendering (optional)
+    table_macro <name>             # DuckDB macro for ASCII table output (optional)
+    table_path <name>              # Endpoint path for table macro (default: "_table")
     base_path <path>               # Base URL path for links and health endpoint (optional)
     health_enabled <bool>          # Enable health check endpoint (default: false)
     health_path <name>             # Health endpoint path relative to base_path (default: "_health")
@@ -112,6 +114,8 @@ docker run -p 8080:8080 \
 | `SEARCH_PARAM` | `q` | Query parameter for search |
 | `INIT_SQL_COMMANDS_FILE` | (none) | SQL file to execute on startup |
 | `RECORD_MACRO` | (none) | DuckDB macro for on-the-fly record rendering |
+| `TABLE_MACRO` | (none) | DuckDB macro for ASCII table output |
+| `TABLE_PATH` | `_table` | Endpoint path for table macro |
 | `BASE_PATH` | (none) | Base URL path for links and health endpoint |
 | `HEALTH_ENABLED` | `false` | Enable health check endpoint |
 | `HEALTH_PATH` | `_health` | Health endpoint path relative to base_path |
@@ -295,6 +299,73 @@ docker run -p 8080:8080 \
 | Performance | Faster (no rendering) | Slower (rendering per request) |
 
 **Note:** When `record_macro` is set, the `table`, `id_column`, and `where_clause` directives are ignored for individual record queries. Index and search still use their respective macros.
+
+## Table Macro (ASCII Table Output)
+
+The `table_macro` feature serves tabular data from DuckDB macros as formatted ASCII tables, wrapped in HTML `<pre>` tags. This is useful for lightweight data visualization without JavaScript charting libraries.
+
+### Configuration
+
+```caddyfile
+html_from_duckdb {
+    database_path works.db
+    table html
+    base_path /works
+    table_macro render_stats
+    table_path _stats
+}
+```
+
+The table endpoint will be available at `{base_path}/{table_path}` (e.g., `/works/_stats`).
+
+### Example Macro
+
+Create a table macro that returns tabular data. URL query parameters are passed to the macro by name:
+
+```sql
+CREATE OR REPLACE MACRO render_stats(year := 2024, max_items := 10, base_path := '') AS TABLE
+SELECT
+    author,
+    pub_count,
+    tp_bar(pub_count, min := 0, max := 100, width := 40) as chart
+FROM author_stats
+WHERE pub_year = year
+ORDER BY pub_count DESC
+LIMIT max_items;
+```
+
+Request: `GET /works/_stats?year=2025&max_items=5`
+
+### Response Format
+
+The output is an ASCII table wrapped in HTML:
+
+```html
+<pre class="duckbox">
+author              pub_count  chart
+John Smith                 87  ████████████████████████████████████
+Jane Doe                   62  █████████████████████████
+Bob Wilson                 34  █████████████
+</pre>
+```
+
+Features:
+- Numeric columns are right-aligned, text columns are left-aligned
+- No borders for clean, Tufte-style data presentation
+- Use CSS `overflow-x: auto` on the `<pre>` for horizontal scrolling
+- Works with DuckDB's `textplot` extension for ASCII bar charts (`tp_bar`, `tp_sparkline`)
+
+### Usage with Container
+
+```bash
+docker run -p 8080:8080 \
+  -e DATABASE_PATH=works.db \
+  -e TABLE_MACRO=render_stats \
+  -e TABLE_PATH=_stats \
+  -e BASE_PATH=/works \
+  -v ./mydata:/srv:ro \
+  ghcr.io/mskyttner/caddy-html-duckdb:main
+```
 
 ## Health Check
 
