@@ -20,6 +20,9 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	_ "github.com/duckdb/duckdb-go/v2"
+	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 	"go.uber.org/zap"
 )
 
@@ -127,6 +130,15 @@ type HTMLFromDuckDB struct {
 	// The macro should accept an id parameter and return a single html column.
 	RecordMacro string `json:"record_macro,omitempty"`
 
+	// TableMacro is the name of a DuckDB table macro for rendering tabular data.
+	// The macro returns multiple columns which are formatted as an ASCII table.
+	// URL query parameters are passed to the macro by name.
+	TableMacro string `json:"table_macro,omitempty"`
+
+	// TablePath is the endpoint path for the table macro, relative to BasePath.
+	// Default: "_table"
+	TablePath string `json:"table_path,omitempty"`
+
 	// HealthEnabled enables a health check endpoint.
 	// Default: false
 	HealthEnabled bool `json:"health_enabled,omitempty"`
@@ -181,6 +193,9 @@ func (h *HTMLFromDuckDB) Provision(ctx caddy.Context) error {
 	}
 	if h.SearchParam == "" {
 		h.SearchParam = "q"
+	}
+	if h.TablePath == "" {
+		h.TablePath = "_table"
 	}
 	if h.HealthPath == "" {
 		h.HealthPath = "_health"
@@ -422,6 +437,17 @@ func (h *HTMLFromDuckDB) ServeHTTP(w http.ResponseWriter, r *http.Request, next 
 		}
 		if r.URL.Path == healthPath {
 			return h.serveHealth(w, r)
+		}
+	}
+
+	// Check for table endpoint
+	if h.TableMacro != "" {
+		tablePath := "/" + h.TablePath
+		if h.BasePath != "" {
+			tablePath = h.BasePath + "/" + h.TablePath
+		}
+		if strings.HasPrefix(r.URL.Path, tablePath) {
+			return h.serveTable(w, r)
 		}
 	}
 
@@ -675,6 +701,187 @@ func (h *HTMLFromDuckDB) serveSearch(w http.ResponseWriter, r *http.Request, sea
 	return nil
 }
 
+// serveTable serves tabular data from a DuckDB macro, formatted as an ASCII table.
+func (h *HTMLFromDuckDB) serveTable(w http.ResponseWriter, r *http.Request) error {
+	// Extract query params
+	params := r.URL.Query()
+
+	// Build macro call with all params
+	var paramParts []string
+	for key, values := range params {
+		if len(values) > 0 {
+			// Sanitize parameter name
+			sanitizedKey := sanitizeIdentifier(key)
+			if sanitizedKey == "" {
+				continue
+			}
+			// Try to parse as int, otherwise treat as string
+			if _, err := strconv.Atoi(values[0]); err == nil {
+				paramParts = append(paramParts, fmt.Sprintf("%s := %s",
+					sanitizedKey, values[0]))
+			} else {
+				paramParts = append(paramParts, fmt.Sprintf("%s := '%s'",
+					sanitizedKey, escapeSQLString(values[0])))
+			}
+		}
+	}
+
+	// Add base_path if not already provided
+	if params.Get("base_path") == "" {
+		basePath := h.BasePath
+		if basePath == "" {
+			basePath = strings.TrimSuffix(r.URL.Path, "/")
+		}
+		paramParts = append(paramParts, fmt.Sprintf("base_path := '%s'", escapeSQLString(basePath)))
+	}
+
+	query := fmt.Sprintf("SELECT * FROM %s(%s)",
+		sanitizeIdentifier(h.TableMacro),
+		strings.Join(paramParts, ", "))
+
+	h.logger.Debug("executing table macro",
+		zap.String("macro", h.TableMacro),
+		zap.String("query", query))
+
+	// Execute with timeout
+	ctx := r.Context()
+	if h.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, h.timeout)
+		defer cancel()
+	}
+
+	rows, err := h.db.QueryContext(ctx, query)
+	if err != nil {
+		h.logger.Error("table macro failed", zap.Error(err))
+		return caddyhttp.Error(http.StatusInternalServerError, err)
+	}
+	defer rows.Close()
+
+	// Format with tablewriter
+	html, err := h.formatTable(rows)
+	if err != nil {
+		h.logger.Error("table formatting failed", zap.Error(err))
+		return caddyhttp.Error(http.StatusInternalServerError, err)
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Length", strconv.Itoa(len(html)))
+	w.Header().Set("Cache-Control", "no-cache")
+
+	w.WriteHeader(http.StatusOK)
+	if _, err := w.Write([]byte(html)); err != nil {
+		h.logger.Error("failed to write response", zap.Error(err))
+		return err
+	}
+
+	h.logger.Debug("served table",
+		zap.String("macro", h.TableMacro),
+		zap.Int("size", len(html)))
+
+	return nil
+}
+
+// formatTable formats SQL rows as an ASCII table wrapped in HTML pre tags.
+func (h *HTMLFromDuckDB) formatTable(rows *sql.Rows) (string, error) {
+	cols, err := rows.ColumnTypes()
+	if err != nil {
+		return "", err
+	}
+
+	colNames := make([]string, len(cols))
+	alignments := make([]tw.Align, len(cols))
+	for i, col := range cols {
+		colNames[i] = col.Name()
+		// Right-align numeric types
+		switch col.DatabaseTypeName() {
+		case "INTEGER", "BIGINT", "DOUBLE", "FLOAT", "DECIMAL", "HUGEINT", "SMALLINT", "TINYINT", "UBIGINT", "UINTEGER", "USMALLINT", "UTINYINT":
+			alignments[i] = tw.AlignRight
+		default:
+			alignments[i] = tw.AlignLeft
+		}
+	}
+
+	var buf strings.Builder
+	buf.WriteString(`<pre class="duckbox">`)
+	buf.WriteString("\n")
+
+	// Create table with borderless renderer
+	table := tablewriter.NewTable(&buf,
+		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
+			Borders: tw.BorderNone,
+			Settings: tw.Settings{
+				Separators: tw.Separators{
+					BetweenRows:    tw.Off,
+					BetweenColumns: tw.Off, // no inner separators
+				},
+				Lines: tw.Lines{
+					ShowHeaderLine: tw.On, // blank line after header
+					ShowFooterLine: tw.Off,
+				},
+			},
+		})),
+		tablewriter.WithConfig(tablewriter.Config{
+			Header: tw.CellConfig{
+				Alignment: tw.CellAlignment{
+					Global: tw.AlignLeft,
+				},
+				Formatting: tw.CellFormatting{
+					AutoFormat: tw.Off,
+				},
+			},
+			Row: tw.CellConfig{
+				Alignment: tw.CellAlignment{
+					PerColumn: alignments,
+				},
+			},
+		}),
+	)
+
+	// Convert string slice to any slice for Header
+	headerAny := make([]any, len(colNames))
+	for i, v := range colNames {
+		headerAny[i] = v
+	}
+	table.Header(headerAny...)
+
+	// Add blank line between header and data rows
+	emptyRow := make([]string, len(cols))
+	table.Append(emptyRow)
+
+	// Scan rows
+	values := make([]interface{}, len(cols))
+	valuePtrs := make([]interface{}, len(cols))
+	for i := range values {
+		valuePtrs[i] = &values[i]
+	}
+
+	for rows.Next() {
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return "", err
+		}
+
+		row := make([]string, len(cols))
+		for i, v := range values {
+			if v == nil {
+				row[i] = ""
+			} else {
+				row[i] = fmt.Sprintf("%v", v)
+			}
+		}
+		table.Append(row)
+	}
+
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	table.Render()
+	buf.WriteString(`</pre>`)
+
+	return buf.String(), nil
+}
+
 // HealthResponse represents the JSON structure of a health check response.
 type HealthResponse struct {
 	Status string                  `json:"status"`
@@ -743,6 +950,15 @@ func (h *HTMLFromDuckDB) serveHealth(w http.ResponseWriter, r *http.Request) err
 		recordCheck := h.checkMacro(r.Context(), h.RecordMacro, "record_macro")
 		response.Checks["record_macro"] = recordCheck
 		if recordCheck.Status != "ok" {
+			allHealthy = false
+		}
+	}
+
+	// Check table macro if configured
+	if h.TableMacro != "" {
+		tableCheck := h.checkMacro(r.Context(), h.TableMacro, "table_macro")
+		response.Checks["table_macro"] = tableCheck
+		if tableCheck.Status != "ok" {
 			allHealthy = false
 		}
 	}
@@ -1010,6 +1226,18 @@ func (h *HTMLFromDuckDB) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					h.RecordMacro = d.Val()
 				}
 				// No error if empty - allows {$RECORD_MACRO:} with empty default
+
+			case "table_macro":
+				if d.NextArg() {
+					h.TableMacro = d.Val()
+				}
+				// No error if empty - allows {$TABLE_MACRO:} with empty default
+
+			case "table_path":
+				if d.NextArg() {
+					h.TablePath = d.Val()
+				}
+				// No error if empty - allows {$TABLE_PATH:} with empty default
 
 			case "health_enabled":
 				if !d.NextArg() {
