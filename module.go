@@ -811,15 +811,15 @@ func (h *HTMLFromDuckDB) formatTable(rows *sql.Rows) (string, error) {
 		tablewriter.WithRenderer(renderer.NewBlueprint(tw.Rendition{
 			Borders: tw.BorderNone,
 			Settings: tw.Settings{
-            			Separators: tw.Separators{
-                			BetweenRows:    tw.Off,
-                			BetweenColumns: tw.Off,                  // no inner separators
-            			},
-            			Lines: tw.Lines{
-                			ShowHeaderLine: tw.On,                   // blank line after header
-                			ShowFooterLine: tw.Off,
-            			},
-        		},
+				Separators: tw.Separators{
+					BetweenRows:    tw.Off,
+					BetweenColumns: tw.Off, // no inner separators
+				},
+				Lines: tw.Lines{
+					ShowHeaderLine: tw.On, // blank line after header
+					ShowFooterLine: tw.Off,
+				},
+			},
 		})),
 		tablewriter.WithConfig(tablewriter.Config{
 			Header: tw.CellConfig{
