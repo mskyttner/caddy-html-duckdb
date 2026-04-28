@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/md5"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,7 @@ import (
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/caddyserver/caddy/v2/caddyconfig/httpcaddyfile"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	_ "github.com/duckdb/duckdb-go/v2"
+	duckdb "github.com/duckdb/duckdb-go/v2"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/renderer"
 	"github.com/olekukonko/tablewriter/tw"
@@ -228,29 +229,44 @@ func (h *HTMLFromDuckDB) Provision(ctx caddy.Context) error {
 		connStr += "?" + strings.Join(params, "&")
 	}
 
-	// Open database connection
-	h.db, err = sql.Open("duckdb", connStr)
+	// Build a connector that re-runs init SQL on every new pool connection.
+	// This ensures session-scoped settings (e.g. SET search_path) are applied
+	// even after database/sql recycles connections due to SetConnMaxLifetime.
+	initFile := h.InitSQLFile
+	connector, err := duckdb.NewConnector(connStr, func(execer driver.ExecerContext) error {
+		if initFile == "" {
+			return nil
+		}
+		stmts, readErr := readInitSQLFile(initFile)
+		if readErr != nil {
+			return readErr
+		}
+		ctx := context.Background()
+		for _, stmt := range stmts {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			if _, execErr := execer.ExecContext(ctx, stmt, nil); execErr != nil {
+				return fmt.Errorf("init SQL failed: %v\nStatement: %s", execErr, truncateForLog(stmt, 200))
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("failed to open database: %v", err)
+		return fmt.Errorf("failed to create database connector: %v", err)
 	}
+	h.db = sql.OpenDB(connector)
 
 	// Configure connection pool
 	h.db.SetMaxOpenConns(h.ConnectionPoolSize)
 	h.db.SetMaxIdleConns(h.ConnectionPoolSize / 2)
 	h.db.SetConnMaxLifetime(time.Hour)
 
-	// Test connection
+	// Test connection (also triggers first connInitFn run)
 	if err := h.db.Ping(); err != nil {
 		h.db.Close()
 		return fmt.Errorf("failed to ping database: %v", err)
-	}
-
-	// Execute init SQL file if specified
-	if h.InitSQLFile != "" {
-		if err := h.executeInitSQL(); err != nil {
-			h.db.Close()
-			return fmt.Errorf("failed to execute init SQL file: %v", err)
-		}
 	}
 
 	h.logger.Info("HTML from DuckDB handler provisioned",
@@ -272,20 +288,16 @@ func (h *HTMLFromDuckDB) Cleanup() error {
 	return nil
 }
 
-// executeInitSQL reads and executes SQL statements from the init file.
-func (h *HTMLFromDuckDB) executeInitSQL() error {
-	file, err := os.Open(h.InitSQLFile)
+// readInitSQLFile reads an init SQL file and returns its parsed statements.
+func readInitSQLFile(path string) ([]string, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return fmt.Errorf("failed to open init SQL file %s: %v", h.InitSQLFile, err)
+		return nil, fmt.Errorf("failed to open init SQL file %s: %v", path, err)
 	}
 	defer file.Close()
 
-	h.logger.Info("executing init SQL file", zap.String("file", h.InitSQLFile))
-
-	// Read entire file
 	var content strings.Builder
 	scanner := bufio.NewScanner(file)
-	// Increase buffer size for large files
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 	for scanner.Scan() {
@@ -293,31 +305,9 @@ func (h *HTMLFromDuckDB) executeInitSQL() error {
 		content.WriteString("\n")
 	}
 	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read init SQL file: %v", err)
+		return nil, fmt.Errorf("failed to read init SQL file: %v", err)
 	}
-
-	// Parse and execute statements
-	statements := parseSQLStatements(content.String())
-	for i, stmt := range statements {
-		stmt = strings.TrimSpace(stmt)
-		if stmt == "" {
-			continue
-		}
-
-		h.logger.Debug("executing init SQL statement",
-			zap.Int("index", i+1),
-			zap.String("statement", truncateForLog(stmt, 100)))
-
-		if _, err := h.db.Exec(stmt); err != nil {
-			return fmt.Errorf("failed to execute statement %d: %v\nStatement: %s", i+1, err, truncateForLog(stmt, 200))
-		}
-	}
-
-	h.logger.Info("init SQL file executed successfully",
-		zap.String("file", h.InitSQLFile),
-		zap.Int("statements", len(statements)))
-
-	return nil
+	return parseSQLStatements(content.String()), nil
 }
 
 // parseSQLStatements splits SQL content into individual statements.
