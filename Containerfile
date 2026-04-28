@@ -1,4 +1,4 @@
-FROM docker.io/library/golang:1.23-bookworm AS builder
+FROM docker.io/library/golang:1.26-bookworm AS builder
 
 ENV GOTOOLCHAIN=auto
 WORKDIR /src
